@@ -1,0 +1,141 @@
+# Project: دور القرآن] — Frontend
+---
+
+
+You are an expert React Native developer helping build [App_Name], [Description]
+
+## Tech Stack
+- React Native with Expo (SDK 54)
+- TypeScript (strict mode)
+- Expo Router for routing
+- React Context + TanStack/ReactQuery for state management
+- Axios for API calls
+- StyleSheet for styling
+
+## API Connection
+- Backend runs at: http://localhost:8000 (dev) 
+- All API calls go through /api folder
+- Auth token stored in SecureStore, sent as Bearer token
+
+## TypeScript Rules
+- Always use TypeScript, never plain JS
+- Define interfaces for all props, API responses, and state
+- No `any` type
+- Export shared types from /types folder
+
+## Component Pattern
+interface ComponentNameProps {
+  prop1: string;
+  onAction: () => void;
+}
+
+export default function ComponentName({ prop1, onAction }: ComponentNameProps) {
+  // 1. Hooks (useState, useEffect, useContext, custom)
+  // 2. Derived values
+  // 3. Handlers (prefixed with "handle")
+  // 4. Return JSX
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});
+
+## Naming Conventions
+- Components: PascalCase (ProductCard.tsx)
+- Screens: PascalCase with Screen suffix (HomeScreen.tsx)
+- Hooks: camelCase with use prefix (useProducts.ts)
+- Handlers: camelCase with handle prefix (handlePress, handleSubmit)
+- API functions: camelCase verb-first (getProducts, createOrder)
+
+## Folder Structure
+- run "npm run reset-project" to clear the default settings
+app/                    → Expo Router screens (file-based routing)
+├── _layout.tsx         → Root layout with providers
+├── index.tsx           → Entry point (redirects based on auth)
+├── (auth)/             → Auth group
+│   ├── _layout.tsx
+│   ├── login.tsx
+│   └── register.tsx
+└── (main)/             → Authenticated screens
+    ├── _layout.tsx     → Protected route wrapper
+    └── [screens].tsx
+
+src/
+├── components/         → Reusable UI components
+├── api/                → API functions (used by React Query)
+├── hooks/              → Custom hooks (queries, mutations, utilities)
+├── context/            → Auth context only
+├── types/              → Shared TypeScript interfaces
+└── utils/              → Helper functions
+
+
+## State Management
+- Local state: useState for component-specific state
+- Shared state: React Context for auth, cart, user data
+- Server state: Consider React Query patterns for caching
+- Set up the QueryClient in rootLayout
+import { Stack } from 'expo-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from '../src/context/AuthContext';
+
+const queryClient = new QueryClient();
+
+export default function RootLayout() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}
+- use the useMutation and useQuery inside the screens, avoid using custom hooks. 
+
+
+## Navigation Patterns
+- Type-safe navigation with typed param lists
+- Screen names as constants
+- Deep linking configured for main routes
+
+## Error Handling
+- try/catch around all API calls
+- User-friendly error messages via Alert or Toast
+- Loading states for all async operations
+
+## Styling Rules 
+- StyleSheet.create() at bottom of file
+- No inline styles except for dynamic values
+- Consistent spacing using multiples of 4 (4, 8, 12, 16, 24, 32)
+- Colors from a central theme/constants file
+
+## API Call Pattern
+- Create an instance for axios first that has a baseURL for the backend
+- Utalize interceptors in the instance to send the token as Bearer Token with each request
+
+export const getProducts = async () => {
+  try {
+    const token = await SecureStore.getItemAsync('token');
+    const response = await instance.get(`/products`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data.data;
+  } catch (error) {
+    console.error('getProducts error:', error);
+    throw error;
+  }
+};
+
+## Auth Context
+- Auth context to handle the user state should created in the Context/ and it should only include createContext and the blueprint of the values we will store
+- The actual values should be set up in the root layout <AuthContext.Provider > and provide the actual values. 
+- Login and Register should be implemented using useMutation inside their presepective screens
+
+## When Generating Code
+1. Match existing component patterns exactly (check @file references)
+2. Include loading and error states
+3. Make it accessible (accessibilityLabel on interactive elements)
+4. Handle empty states gracefully
+5. TypeScript types are mandatory, not optional
+
