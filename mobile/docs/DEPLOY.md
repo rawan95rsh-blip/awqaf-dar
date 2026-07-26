@@ -1,82 +1,83 @@
-# نشر Backend للإنتاج (أسبوع 10 يوم 3)
+# نشر Backend — Render + MongoDB Atlas
 
-## الوضع الحالي
+## المعمارية (لا تخلطين بينهما)
 
-| الخيار | متى | الاستقرار |
-|--------|-----|-----------|
-| **نفق Cloudflare (جاهز الآن)** | تجربة HTTPS / بناء تجريبي | مؤقت — يحتاج اللابتوب شغّال + النفق |
-| **Render (دائم)** | TestFlight / App Store | دائم — يحتاج رفع `backend` على GitHub |
+| الخدمة | الدور |
+|--------|--------|
+| **MongoDB Atlas** | قاعدة البيانات (تبقى كما هي) |
+| **Render** | يشغّل كود `backend` على `https://…` |
 
-### رابط HTTPS الحالي (نفق)
-
-```
-https://refers-headset-expenditures-chairman.trycloudflare.com
-```
-
-تحقق: افتحي `/api/health` → `{"success":true,"data":{"status":"ok"}}`
-
-مضبوط أيضاً في `mobile/eas.json` (preview + production).
-
-**مهم:** إذا أعدتِ تشغيل النفق يتغيّر الرابط — حدّثي `eas.json` من جديد.  
-أبقِ طرفين مفتوحين: `npm start` في `backend` + سكربت النفق.
-
-```bash
-# من جذر المشروع (بعد ما يكون الـ API على :8000)
-./scripts/start-api-tunnel.sh
-```
+الـ API على Render يتصل بـ Atlas عبر `MONGODB_URI`.
 
 ---
 
-## نشر دائم على Render (موصى به للإطلاق)
+## جاهز في المستودع
 
-### لماذا؟
+- [x] `backend/` + `render.yaml` على GitHub فرع **`main`**
+- [x] Health: `GET /api/health`
+- [x] البناء: `npm ci && npm run build` ثم `npm start`
 
-على GitHub حالياً فرع `main` فيه `mobile` فقط — مجلد `backend` محلي ولم يُرفع بعد.  
-Render يبني من GitHub، فلازم رفع الباك اند أولاً (commit + push).
+---
 
-### الخطوات
+## خطوات Render (مرة واحدة)
 
-1. ارفعي المستودع شاملاً `backend/` و `render.yaml` إلى GitHub.
-2. [render.com](https://render.com) → New → **Blueprint** → اختاري الريبو `awqaf-dar`.
-3. املئي الأسرار لما يُطلب:
-   - `MONGODB_URI` — انسخي من `backend/.env` المحلي
-   - `JWT_SECRET` — يمكن توليده تلقائياً من Render أو انسخيه
-4. بعد Deploy انسخ الرابط مثل `https://awqaf-dar-api.onrender.com`
-5. استبدلي في `eas.json` رابط النفق برابط Render.
-6. في Atlas: Network Access → اسمحي بـ `0.0.0.0/0` (أو IPs الخاصة بـ Render).
+1. ادخلي: [إنشاء Blueprint من الريبو](https://dashboard.render.com/blueprint/new?repo=https://github.com/rawan95rsh-blip/awqaf-dar)  
+   (أو Dashboard → New → Blueprint → اختاري `awqaf-dar` / فرع `main`)
 
-`render.yaml` في جذر المشروع مضبوط مسبقاً (`rootDir: backend`, health `/api/health`).
+2. اربطي حساب GitHub إن طُلب، ووافقي على تطبيق الـ Blueprint.
 
-### متغيرات الإنتاج
+3. عند `MONGODB_URI` (sync: false):  
+   انسخي القيمة من ملفك المحلي `backend/.env` (سطر `MONGODB_URI=…` بالكامل بعد علامة `=`).
 
-| المتغير | ملاحظة |
+4. `JWT_SECRET` يُولَّد تلقائياً من Render — اتركيه.
+
+5. Apply / Create → انتظري حتى تصبح الخدمة **Live**.
+
+6. انسخي الرابط العام، مثال:
+   `https://awqaf-dar-api.onrender.com`  
+   (بدون شرطة `/` في النهاية)
+
+7. افتحي في المتصفح:  
+   `https://YOUR-SERVICE.onrender.com/api/health`  
+   لازم يظهر: `{"success":true,"data":{"status":"ok"}}`
+
+8. في **MongoDB Atlas** → Network Access → أضيفي `0.0.0.0/0`  
+   (كي يسمح لاتصال Render؛ أو قيّدي لاحقاً بـ IPs إن لزم).
+
+9. حدّثي الموبايل — في `mobile/eas.json` للـ `preview` و `production`:
+
+```json
+"EXPO_PUBLIC_API_URL": "https://YOUR-SERVICE.onrender.com"
+```
+
+ثم أرسلي الرابط في المحادثة لنضبطه في المشروع تلقائياً.
+
+---
+
+## متغيرات البيئة على Render
+
+| المفتاح | المصدر |
 |---------|--------|
-| `MONGODB_URI` | Atlas |
-| `JWT_SECRET` | عشوائي طويل |
+| `NODE_ENV` | `production` (من الـ Blueprint) |
 | `JWT_EXPIRES_IN` | `7d` |
-| `NODE_ENV` | `production` (في الـ Blueprint) |
+| `JWT_SECRET` | توليد تلقائي |
+| `MONGODB_URI` | من `backend/.env` المحلي يدوياً |
 
-**لا تضعي** `DEV_VERIFICATION_CODE` في الإنتاج.
+**لا تضعي** `DEV_VERIFICATION_CODE` على Render.
 
-### أوامر البناء (تلقائية على Render)
+---
+
+## ملاحظات Free plan
+
+- الخدمة قد **تنام** بعد خمول؛ أول طلب بعد النوم يتأخر ~30–60 ثانية.
+- للإطلاق الجاد لاحقاً يمكن ترقية الخطة.
+
+---
+
+## تجربة محلية (بدون Render)
 
 ```bash
-cd backend
-npm ci && npm run build
-npm start
+cd backend && npm run build && npm start
 ```
 
----
-
-## الموبايل محلياً
-
-للمحاكي/الجهاز على نفس الشبكة: `EXPO_PUBLIC_API_URL` في `mobile/.env` = IP الماك.  
-للتجربة عبر الإنترنت الآن: رابط النفق أعلاه.
-
----
-
-## أمان مطبّق في الكود
-
-- Rate limit على login
-- `trust proxy` عند `NODE_ENV=production`
-- الاستماع على `0.0.0.0` لاستضافة السحابة
+الجهاز الحقيقي: `EXPO_PUBLIC_API_URL` في `mobile/.env` = IP الماك.

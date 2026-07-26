@@ -1,12 +1,13 @@
 # Render Blueprint — نشر awqaf-dar API
-# بعد رفع المستودع على GitHub: Dashboard → New → Blueprint → اختر الريبو
-# https://render.com/docs/infrastructure-as-code
+# Dashboard → New → Blueprint → الريبو awqaf-dar (فرع main)
+# أو: https://dashboard.render.com/blueprint/new?repo=https://github.com/rawan95rsh-blip/awqaf-dar
 
 services:
   - type: web
     name: awqaf-dar-api
     runtime: node
     plan: free
+    branch: main
     rootDir: backend
     buildCommand: npm ci && npm run build
     startCommand: npm start
