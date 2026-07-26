@@ -1,9 +1,17 @@
 import { useEffect } from "react";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useAuth } from "@/src/context/AuthContext";
+import { isStoredSessionValid } from "@/src/api/auth";
 
 /** مؤقتاً: true = تجاوز الترحيب وتسجيل الدخول والذهاب مباشرة للصفحات الداخلية */
 const SKIP_LOGIN_FOR_DEV = false;
+
+function getHomeRoute(role?: string): Href {
+  if (role === "student") {
+    return "/(auth)/student-home" as Href;
+  }
+  return "/main" as Href;
+}
 
 export default function IndexScreen() {
   const router = useRouter();
@@ -11,14 +19,14 @@ export default function IndexScreen() {
 
   useEffect(() => {
     if (SKIP_LOGIN_FOR_DEV) {
-      router.replace("/main" as import("expo-router").Href);
+      router.replace("/main" as Href);
       return;
     }
     if (isLoading) return;
-    if (token && user) {
-      router.replace("/main" as import("expo-router").Href);
+    if (isStoredSessionValid(token, user)) {
+      router.replace(getHomeRoute(user?.role));
     } else {
-      router.replace("/(auth)/welcome" as import("expo-router").Href);
+      router.replace("/(auth)/welcome" as Href);
     }
   }, [isLoading, token, user, router]);
 

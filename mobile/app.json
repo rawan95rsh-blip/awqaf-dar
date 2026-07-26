@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
@@ -14,9 +14,17 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "kw.awqaf.darquran",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSUserNotificationsUsageDescription": "لإشعارات قبول التسجيل واعتذار المعلمة عن الحصة",
+        "NSFaceIDUsageDescription": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور"
+      }
     },
     "android": {
+      "package": "kw.awqaf.darquran",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -31,10 +39,29 @@
     },
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#1d9bf0"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e8bb9308-72f5-4285-b970-6ae217a5fc5b"
+      }
+    },
+    "owner": "rawan.alshatri"
   }
 }

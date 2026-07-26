@@ -5,21 +5,25 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Modal,
+  Alert,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
+import { useMutation } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ScreenContainer from "@/src/components/ScreenContainer";
 import Input from "@/src/components/Input";
 import Button from "@/src/components/Button";
-import { colors, spacing } from "@/constants";
-import { setPendingCenterRegistration } from "@/src/api/auth";
-
-const CENTER_OPTIONS = [
-  "مركز رسل",
-  "مركز محمد الوزان",
-  "مركز عبدالله مبارك",
-] as const;
+import { colors, spacing, centerColors } from "@/constants";
+import {
+  filterDigitsOnly,
+  isDigitsOnlyPassword,
+  PASSWORD_DIGITS_ERROR_AR,
+} from "@/src/utils/password";
+import {
+  registerCenterApi,
+  setPendingRegistrationPhone,
+  type RegisterCenterRequest,
+} from "@/src/api/auth";
 
 const SPECIALIZATIONS = [
   {
@@ -54,15 +58,49 @@ const SPECIALIZATIONS = [
   },
 ];
 
+function normalizePhone(phone: string): string {
+  return phone.trim().replace(/\s/g, "");
+}
+
+function validateForm(
+  email: string,
+  phone: string,
+  centerName: string,
+  supervisorName: string,
+  password: string,
+  selectedSpecs: Set<string>
+): string | null {
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail) return "أدخل البريد الإلكتروني";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return "البريد الإلكتروني غير صالح";
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) return "أدخل رقم الهاتف";
+  if (!/^\d{10}$/.test(normalizedPhone)) {
+    return "رقم الهاتف يجب أن يكون 10 أرقام";
+  }
+
+  if (!centerName.trim()) return "أدخل اسم المركز";
+  if (!supervisorName.trim()) return "أدخل اسم مشرفة المركز";
+  if (!password) return "أدخل الرقم السري";
+  if (!isDigitsOnlyPassword(password)) return PASSWORD_DIGITS_ERROR_AR;
+  if (selectedSpecs.size === 0) return "اختر تخصصاً واحداً على الأقل";
+
+  return null;
+}
+
 export default function RegisterCenterScreen() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [centerName, setCenterName] = useState<string | null>(null);
+  const [centerName, setCenterName] = useState("");
   const [supervisorName, setSupervisorName] = useState("");
   const [password, setPassword] = useState("");
   const [selectedSpecs, setSelectedSpecs] = useState<Set<string>>(new Set());
-  const [centerDropdownVisible, setCenterDropdownVisible] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [devCodeHint, setDevCodeHint] = useState<string | null>(null);
 
   const toggleSpec = (id: string) => {
     setSelectedSpecs((prev) => {
@@ -71,24 +109,61 @@ export default function RegisterCenterScreen() {
       else next.add(id);
       return next;
     });
+    if (error) setError(null);
   };
 
+  const mutation = useMutation({
+    mutationFn: (payload: RegisterCenterRequest) =>
+      new Promise<import("@/src/api/auth").RegisterCenterResponse>(
+        (resolve, reject) => {
+          registerCenterApi(payload, resolve, reject);
+        }
+      ),
+    onSuccess: (data) => {
+      setError(null);
+      if (data.devCode) {
+        setDevCodeHint(data.devCode);
+        if (__DEV__) {
+          Alert.alert("كود التطوير", data.devCode);
+        }
+      }
+      setPendingRegistrationPhone(data.phone, () => {
+        router.push({
+          pathname: "/(auth)/register-center-verify",
+          params: { phone: data.phone },
+        } as Href);
+      });
+    },
+    onError: (err: Error) => {
+      setError(err.message ?? "فشل إنشاء الحساب");
+    },
+  });
+
   const handleContinue = () => {
-    setPendingCenterRegistration(
-      {
-        email: email.trim(),
-        phone: phone.trim(),
-        password,
-        centerName,
-        supervisorName: supervisorName.trim(),
-        specializations: Array.from(selectedSpecs),
-      },
-      () => {
-        router.push(
-          "/(auth)/register-center-verify" as import("expo-router").Href,
-        );
-      },
+    setError(null);
+    setDevCodeHint(null);
+
+    const validationError = validateForm(
+      email,
+      phone,
+      centerName,
+      supervisorName,
+      password,
+      selectedSpecs
     );
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    mutation.mutate({
+      email: email.trim().toLowerCase(),
+      phone: normalizePhone(phone),
+      password,
+      centerName: centerName.trim(),
+      supervisorName: supervisorName.trim(),
+      specializations: Array.from(selectedSpecs),
+    });
   };
 
   return (
@@ -98,7 +173,6 @@ export default function RegisterCenterScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>إنشاء حساب مركز جديد</Text>
           <View style={styles.headerDots}>
@@ -108,7 +182,6 @@ export default function RegisterCenterScreen() {
           </View>
         </View>
 
-        {/* Logo placeholder */}
         <View style={styles.logoBox}>
           <MaterialCommunityIcons
             name="diamond-stone"
@@ -119,12 +192,16 @@ export default function RegisterCenterScreen() {
         <Text style={styles.logoTitle}>مطور</Text>
         <Text style={styles.logoSubtitle}>منصة إدارة مراكز القرآن</Text>
 
-        {/* Form */}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
         <Input
           label="البريد الإلكتروني"
           required
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(text) => {
+            setEmail(text);
+            if (error) setError(null);
+          }}
           placeholder="example@center.com"
           keyboardType="email-address"
           autoComplete="email"
@@ -134,69 +211,34 @@ export default function RegisterCenterScreen() {
           label="رقم الهاتف"
           required
           value={phone}
-          onChangeText={setPhone}
-          placeholder="5X XXX XXXX 966+"
+          onChangeText={(text) => {
+            setPhone(text);
+            if (error) setError(null);
+          }}
+          placeholder="05XXXXXXXX"
           keyboardType="phone-pad"
           autoComplete="tel"
           accessibilityLabel="رقم الهاتف"
         />
-
-        {/* Center dropdown */}
-        <View style={styles.fieldWrapper}>
-          <Text style={styles.label}>اسم المركز *</Text>
-          <Pressable
-            style={styles.dropdownTrigger}
-            onPress={() => setCenterDropdownVisible(true)}
-            accessibilityLabel="اختر المركز"
-          >
-            <Text
-              style={[
-                styles.dropdownText,
-                !centerName && styles.dropdownPlaceholder,
-              ]}
-            >
-              {centerName ?? "اختر المركز"}
-            </Text>
-            <MaterialCommunityIcons
-              name="chevron-down"
-              size={24}
-              color={colors.textSecondary}
-            />
-          </Pressable>
-        </View>
-
-        <Modal
-          visible={centerDropdownVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setCenterDropdownVisible(false)}
-        >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setCenterDropdownVisible(false)}
-          >
-            <View style={styles.modalContent}>
-              {CENTER_OPTIONS.map((name) => (
-                <Pressable
-                  key={name}
-                  style={styles.modalOption}
-                  onPress={() => {
-                    setCenterName(name);
-                    setCenterDropdownVisible(false);
-                  }}
-                >
-                  <Text style={styles.modalOptionText}>{name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </Pressable>
-        </Modal>
-
+        <Input
+          label="اسم المركز"
+          required
+          value={centerName}
+          onChangeText={(text) => {
+            setCenterName(text);
+            if (error) setError(null);
+          }}
+          placeholder="مركز النور"
+          accessibilityLabel="اسم المركز"
+        />
         <Input
           label="اسم مشرفة المركز"
           required
           value={supervisorName}
-          onChangeText={setSupervisorName}
+          onChangeText={(text) => {
+            setSupervisorName(text);
+            if (error) setError(null);
+          }}
           placeholder="أ. فاطمة الأحمد"
           accessibilityLabel="اسم مشرفة المركز"
         />
@@ -204,14 +246,17 @@ export default function RegisterCenterScreen() {
           label="الرقم السري"
           required
           value={password}
-          onChangeText={setPassword}
-          placeholder="********"
+          onChangeText={(text) => {
+            setPassword(filterDigitsOnly(text));
+            if (error) setError(null);
+          }}
+          placeholder="أرقام فقط — 6 على الأقل"
           secureTextEntry
+          keyboardType="number-pad"
           autoComplete="new-password"
           accessibilityLabel="الرقم السري"
         />
 
-        {/* Specializations */}
         <Text style={styles.specTitle}>
           المركز متخصص بـ * (اختيار واحد أو أكثر)
         </Text>
@@ -247,8 +292,16 @@ export default function RegisterCenterScreen() {
           ))}
         </View>
 
+        {devCodeHint ? (
+          <Text style={styles.devCodeHint}>كود التطوير: {devCodeHint}</Text>
+        ) : null}
+
         <View style={styles.buttonWrapper}>
-          <Button onPress={handleContinue} accessibilityLabel="متابعة">
+          <Button
+            onPress={handleContinue}
+            loading={mutation.isPending}
+            accessibilityLabel="متابعة"
+          >
             متابعة
           </Button>
         </View>
@@ -273,14 +326,14 @@ const styles = StyleSheet.create({
   },
   headerDots: { flexDirection: "row", gap: spacing.sm },
   dot: { width: 12, height: 12, borderRadius: 6 },
-  dotGreen: { backgroundColor: "#4caf50" },
-  dotYellow: { backgroundColor: "#ffeb3b" },
-  dotRed: { backgroundColor: "#f44336" },
+  dotGreen: { backgroundColor: centerColors.cardBorder },
+  dotYellow: { backgroundColor: centerColors.cardBorder },
+  dotRed: { backgroundColor: centerColors.cardBorder },
   logoBox: {
     width: 120,
     height: 120,
     borderRadius: 16,
-    backgroundColor: "#f0f0f0",
+    backgroundColor: centerColors.surfaceMuted,
     alignSelf: "center",
     alignItems: "center",
     justifyContent: "center",
@@ -299,45 +352,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: spacing.xl,
   },
-  fieldWrapper: { marginBottom: spacing.md },
-  label: {
+  errorText: {
+    color: colors.error,
     fontSize: 14,
-    color: colors.text,
-    marginBottom: spacing.xs,
-    fontWeight: "500",
+    marginBottom: spacing.md,
+    textAlign: "center",
   },
-  dropdownTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 4,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    minHeight: 48,
-    backgroundColor: colors.background,
-  },
-  dropdownText: { fontSize: 16, color: colors.text },
-  dropdownPlaceholder: { color: colors.textSecondary },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    padding: spacing.xl,
-  },
-  modalContent: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: spacing.sm,
-  },
-  modalOption: {
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  modalOptionText: { fontSize: 16, color: colors.text },
   specTitle: {
     fontSize: 14,
     fontWeight: "600",
@@ -360,7 +380,7 @@ const styles = StyleSheet.create({
   },
   specCardSelected: {
     borderColor: colors.primary,
-    backgroundColor: "#f5f0ff",
+    backgroundColor: centerColors.surfaceMuted,
   },
   specCardTitle: {
     fontSize: 16,
@@ -373,6 +393,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: spacing.xs,
+  },
+  devCodeHint: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: "center",
+    marginBottom: spacing.sm,
   },
   buttonWrapper: { marginTop: spacing.sm },
 });

@@ -1,20 +1,10 @@
 import * as SecureStore from 'expo-secure-store';
-import axios from 'axios';
+import { apiClient, getApiErrorMessage, type ApiSuccess } from '@/src/api/client';
 import type { User } from '@/src/types/auth';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-/** عند true فقط: تسجيل الدخول تجريبي بدون API. الافتراضي false = دخول حقيقي عبر الباك اند. */
-const USE_MOCK_LOGIN = process.env.EXPO_PUBLIC_USE_MOCK_LOGIN === 'true';
-
-/** حساب تجريبي للاختبار عندما USE_MOCK_LOGIN = true */
-export const MOCK_TEST_ACCOUNT = {
-  phone: '0512345678',
-  password: '123456',
-} as const;
-
 export interface LoginCredentials {
-  phone: string;
+  phone?: string;
+  idNumber?: string;
   password: string;
 }
 
@@ -26,42 +16,50 @@ export interface LoginResponse {
 export type LoginSuccessCallback = (data: LoginResponse) => void;
 export type LoginErrorCallback = (error: Error) => void;
 
-/**
- * تسجيل الدخول. إن كان الوضع Mock يُقبل الحساب التجريبي فقط دون استدعاء API.
- */
+/** 12 رقماً → هوية مدنية كويتية، وإلا هاتف */
+export function buildLoginCredentials(
+  identifier: string,
+  password: string
+): LoginCredentials {
+  const trimmed = identifier.trim().replace(/\s/g, '');
+  if (/^\d{12}$/.test(trimmed)) {
+    return { idNumber: trimmed, password };
+  }
+  return { phone: trimmed, password };
+}
+
+export interface RegisterCenterRequest {
+  email: string;
+  phone: string;
+  password: string;
+  centerName: string;
+  supervisorName: string;
+  specializations: string[];
+}
+
+export interface RegisterCenterResponse {
+  message: string;
+  phone: string;
+  devCode?: string;
+}
+
+export interface VerifyCenterRequest {
+  phone: string;
+  code: string;
+}
+
+export type RegisterCenterSuccessCallback = (data: RegisterCenterResponse) => void;
+export type VerifyCenterSuccessCallback = (data: LoginResponse) => void;
+
 export function loginApi(
   credentials: LoginCredentials,
   onSuccess: LoginSuccessCallback,
   onError: LoginErrorCallback
 ): void {
-  if (USE_MOCK_LOGIN) {
-    const phone = credentials.phone.trim().replace(/\s/g, '');
-    const ok =
-      (phone === MOCK_TEST_ACCOUNT.phone || phone === MOCK_TEST_ACCOUNT.phone.replace(/^0/, '')) &&
-      credentials.password === MOCK_TEST_ACCOUNT.password;
-    setTimeout(() => {
-      if (ok) {
-        onSuccess({
-          token: 'mock-token-' + Date.now(),
-          user: { id: '1', phone: phone || MOCK_TEST_ACCOUNT.phone, email: 'test@example.com' },
-        });
-      } else {
-        onError(new Error('رقم الهاتف أو كلمة المرور غير صحيحة'));
-      }
-    }, 400);
-    return;
-  }
-
-  axios
-    .post<{ data?: LoginResponse }>(
-      `${API_URL}/api/auth/login`,
-      credentials,
-      { headers: { 'Content-Type': 'application/json' } }
-    )
+  apiClient
+    .post<ApiSuccess<LoginResponse>>('/api/auth/login', credentials)
     .then((response) => {
-      const raw = response.data?.data ?? response.data;
-      const token = raw && typeof raw === 'object' && 'token' in raw ? raw.token : undefined;
-      const user = raw && typeof raw === 'object' && 'user' in raw ? (raw.user as User) : undefined;
+      const { token, user } = response.data.data;
       if (!token || !user) {
         onError(new Error('استجابة غير صالحة من الخادم'));
         return;
@@ -69,7 +67,47 @@ export function loginApi(
       onSuccess({ token, user });
     })
     .catch((err) => {
-      onError(err?.response?.data?.message ? new Error(err.response.data.message) : err instanceof Error ? err : new Error('فشل تسجيل الدخول'));
+      onError(new Error(getApiErrorMessage(err)));
+    });
+}
+
+export function registerCenterApi(
+  data: RegisterCenterRequest,
+  onSuccess: RegisterCenterSuccessCallback,
+  onError: LoginErrorCallback
+): void {
+  apiClient
+    .post<ApiSuccess<RegisterCenterResponse>>('/api/auth/register-center', data)
+    .then((response) => {
+      const payload = response.data.data;
+      if (!payload?.phone) {
+        onError(new Error('استجابة غير صالحة من الخادم'));
+        return;
+      }
+      onSuccess(payload);
+    })
+    .catch((err) => {
+      onError(new Error(getApiErrorMessage(err)));
+    });
+}
+
+export function verifyCenterApi(
+  data: VerifyCenterRequest,
+  onSuccess: VerifyCenterSuccessCallback,
+  onError: LoginErrorCallback
+): void {
+  apiClient
+    .post<ApiSuccess<LoginResponse>>('/api/auth/verify-center', data)
+    .then((response) => {
+      const { token, user } = response.data.data;
+      if (!token || !user) {
+        onError(new Error('استجابة غير صالحة من الخادم'));
+        return;
+      }
+      onSuccess({ token, user });
+    })
+    .catch((err) => {
+      onError(new Error(getApiErrorMessage(err)));
     });
 }
 
@@ -109,41 +147,42 @@ export function removeStoredUser(callback: () => void): void {
   SecureStore.deleteItemAsync(USER_STORAGE_KEY).then(callback);
 }
 
-/** بيانات إنشاء حساب المركز المؤقتة (حتى إتمام التحقق بالكود) */
-export interface PendingCenterRegistration {
-  email: string;
-  phone: string;
-  password: string;
-  centerName: string | null;
-  supervisorName: string;
-  specializations: string[];
-}
-
 const PENDING_REG_KEY = 'pending_center_registration';
+const PENDING_PHONE_KEY = 'pending_center_phone';
 
-export function setPendingCenterRegistration(
-  data: PendingCenterRegistration,
-  callback: () => void
-): void {
-  SecureStore.setItemAsync(PENDING_REG_KEY, JSON.stringify(data)).then(callback);
+export function setPendingRegistrationPhone(phone: string, callback: () => void): void {
+  SecureStore.setItemAsync(PENDING_PHONE_KEY, phone).then(callback);
 }
 
-export function getPendingCenterRegistration(
-  callback: (data: PendingCenterRegistration | null) => void
+export function getPendingRegistrationPhone(
+  callback: (phone: string | null) => void
 ): void {
-  SecureStore.getItemAsync(PENDING_REG_KEY).then((raw) => {
-    if (!raw) {
-      callback(null);
-      return;
-    }
-    try {
-      callback(JSON.parse(raw) as PendingCenterRegistration);
-    } catch {
-      callback(null);
-    }
-  });
+  SecureStore.getItemAsync(PENDING_PHONE_KEY).then(callback);
 }
 
-export function removePendingCenterRegistration(callback: () => void): void {
-  SecureStore.deleteItemAsync(PENDING_REG_KEY).then(callback);
+export function removePendingRegistrationPhone(callback: () => void): void {
+  SecureStore.deleteItemAsync(PENDING_PHONE_KEY).then(callback);
+}
+
+/** يتحقق أن الجلسة المحفوظة صالحة (ليست mock ولا ناقصة) */
+export function isStoredSessionValid(
+  token: string | null | undefined,
+  user: User | null | undefined
+): boolean {
+  if (!token?.trim()) return false;
+  if (token.startsWith('mock-token')) return false;
+  if (!user?.id?.trim()) return false;
+  return true;
+}
+
+/** مسح كل بيانات الجلسة والتسجيل المؤقت من SecureStore */
+export function clearAuthSession(callback: () => void): void {
+  Promise.all([
+    SecureStore.deleteItemAsync('token'),
+    SecureStore.deleteItemAsync(USER_STORAGE_KEY),
+    SecureStore.deleteItemAsync(PENDING_REG_KEY),
+    SecureStore.deleteItemAsync(PENDING_PHONE_KEY),
+  ])
+    .then(() => callback())
+    .catch(() => callback());
 }

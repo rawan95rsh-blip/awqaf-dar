@@ -1,66 +1,90 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { View, Text, StyleSheet, Pressable, TextInput } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams, type Href } from "expo-router";
+import { useMutation } from "@tanstack/react-query";
 import ScreenContainer from "@/src/components/ScreenContainer";
 import Button from "@/src/components/Button";
-import { colors, spacing } from "@/constants";
+import { colors, spacing, centerColors } from "@/constants";
 import { useAuth } from "@/src/context/AuthContext";
 import {
-  getPendingCenterRegistration,
-  removePendingCenterRegistration,
+  verifyCenterApi,
+  getPendingRegistrationPhone,
+  removePendingRegistrationPhone,
 } from "@/src/api/auth";
-import type { User } from "@/src/types/auth";
-
-/** الكود المعتمد لإتمام إنشاء الحساب (ثابت) */
-const VALID_VERIFICATION_CODE = "7890";
+import { promptEnableBiometricsAfterLogin } from "@/src/utils/biometric";
 
 export default function RegisterCenterVerifyScreen() {
   const router = useRouter();
+  const { phone: phoneParam } = useLocalSearchParams<{ phone?: string }>();
   const { login } = useAuth();
+  const [registrationPhone, setRegistrationPhone] = useState<string | null>(
+    typeof phoneParam === "string" && phoneParam.trim() ? phoneParam.trim() : null
+  );
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (registrationPhone) return;
+    getPendingRegistrationPhone((storedPhone) => {
+      if (storedPhone?.trim()) {
+        setRegistrationPhone(storedPhone.trim());
+      }
+    });
+  }, [registrationPhone]);
+
+  const mutation = useMutation({
+    mutationFn: ({ phone, code: otp }: { phone: string; code: string }) =>
+      new Promise<{ token: string; user: import("@/src/types/auth").User }>(
+        (resolve, reject) => {
+          verifyCenterApi({ phone, code: otp }, resolve, reject);
+        }
+      ),
+    onSuccess: (data) => {
+      setError(null);
+      login(data.token, data.user, () => {
+        removePendingRegistrationPhone(() => {
+          promptEnableBiometricsAfterLogin(() => {
+            router.replace("/main" as Href);
+          });
+        });
+      });
+    },
+    onError: (err: Error) => {
+      setError(err.message ?? "فشل التحقق من الكود");
+    },
+  });
 
   const handleCodeChange = (value: string) => {
     const digits = value.replace(/\D/g, "").slice(0, 4);
     setCode(digits);
-    setError(null);
+    if (error) setError(null);
   };
 
   const handleCreateAccount = () => {
+    if (mutation.isPending) return;
+
     setError(null);
-    if (code !== VALID_VERIFICATION_CODE) {
-      setError("الكود غير صحيح");
+
+    if (!registrationPhone) {
+      setError("لم يُعثر على رقم الهاتف. يرجى إعادة التسجيل.");
       return;
     }
-    setIsSubmitting(true);
-    getPendingCenterRegistration((pending) => {
-      if (!pending) {
-        setError("لم تُحفظ بيانات التسجيل. يرجى إعادة تعبئة النموذج.");
-        setIsSubmitting(false);
-        return;
-      }
-      const user: User = {
-        id: "new-" + Date.now(),
-        email: pending.email || undefined,
-        phone: pending.phone || undefined,
-        centerProfile: pending.centerName
-          ? { nameAr: pending.centerName }
-          : undefined,
-      };
-      const token = "mock-token-" + Date.now();
-      login(token, user, () => {
-        removePendingCenterRegistration(() => {
-          setIsSubmitting(false);
-          router.replace("/(main)" as import("expo-router").Href);
-        });
-      });
-    });
+
+    if (code.length !== 4) {
+      setError("أدخل الكود المكون من 4 أرقام");
+      return;
+    }
+
+    mutation.mutate({ phone: registrationPhone, code });
   };
 
   const handleGoToLogin = () => {
-    router.replace("/(auth)/login" as import("expo-router").Href);
+    router.replace("/(auth)/login" as Href);
+  };
+
+  const handleBackToRegister = () => {
+    router.replace("/(auth)/register-center" as Href);
   };
 
   return (
@@ -68,9 +92,16 @@ export default function RegisterCenterVerifyScreen() {
       <View style={styles.content}>
         <Text style={styles.title}>الكود الخاص لإتمام الحساب *</Text>
 
+        {registrationPhone ? (
+          <Text style={styles.phoneHint}>
+            تم الإرسال إلى: {registrationPhone}
+          </Text>
+        ) : null}
+
         <Pressable
           style={styles.codeRow}
           onPress={() => inputRef.current?.focus()}
+          disabled={mutation.isPending}
         >
           {[0, 1, 2, 3].map((i) => (
             <View key={i} style={styles.codeDot}>
@@ -86,21 +117,37 @@ export default function RegisterCenterVerifyScreen() {
           onChangeText={handleCodeChange}
           keyboardType="number-pad"
           maxLength={4}
+          editable={!mutation.isPending}
           style={styles.hiddenInput}
           accessibilityLabel="إدخال الكود المكون من 4 أرقام"
         />
 
-        <Text style={styles.hint}>يُرسل إليك الكود من قبل المنصة</Text>
+        <Text style={styles.hint}>
+          {__DEV__
+            ? "في التطوير استخدمي الكود 7890"
+            : "يُرسل إليك الكود من قبل المنصة"}
+        </Text>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        {!registrationPhone ? (
+          <Pressable
+            style={styles.backLinkWrap}
+            onPress={handleBackToRegister}
+            accessibilityLabel="العودة للتسجيل"
+          >
+            <Text style={styles.loginLinkHighlight}>العودة لإنشاء الحساب</Text>
+          </Pressable>
+        ) : null}
 
         <View style={styles.buttonWrapper}>
           <Button
             onPress={handleCreateAccount}
-            disabled={isSubmitting}
+            loading={mutation.isPending}
+            disabled={mutation.isPending || !registrationPhone}
             accessibilityLabel="إنشاء الحساب"
           >
-            {isSubmitting ? "جاري إنشاء الحساب…" : "إنشاء الحساب ←"}
+            إنشاء الحساب ←
           </Button>
         </View>
 
@@ -128,7 +175,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  phoneHint: {
+    fontSize: 14,
+    color: colors.textSecondary,
     marginBottom: spacing.lg,
+    textAlign: "right",
   },
   codeRow: {
     flexDirection: "row",
@@ -142,7 +195,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 2,
     borderColor: colors.border,
-    backgroundColor: "#f8f8f8",
+    backgroundColor: centerColors.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -162,15 +215,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    textAlign: "right",
   },
   errorText: {
     fontSize: 14,
     color: colors.error,
     marginBottom: spacing.md,
+    textAlign: "center",
   },
   buttonWrapper: {
     marginTop: spacing.sm,
     marginBottom: spacing.xl,
+  },
+  backLinkWrap: {
+    alignSelf: "center",
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
   },
   loginLinkWrap: {
     alignSelf: "center",

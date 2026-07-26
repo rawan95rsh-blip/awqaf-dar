@@ -1,0 +1,22 @@
+# Render Blueprint — نشر awqaf-dar API
+# بعد رفع المستودع على GitHub: Dashboard → New → Blueprint → اختر الريبو
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  - type: web
+    name: awqaf-dar-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

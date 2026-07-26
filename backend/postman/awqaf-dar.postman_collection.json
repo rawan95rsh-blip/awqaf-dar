@@ -1,0 +1,3163 @@
+{
+  "info": {
+    "_postman_id": "awqaf-dar-api-collection",
+    "name": "awqaf-dar API",
+    "description": "مجموعة طلبات API لمشروع دور القرآن — الأوقاف.\n\n**الاستيراد:** File → Import → اختر هذا الملف + ملف البيئة `awqaf-dar.local.postman_environment.json`\n\n**الترتيب:** Health → Login → باقي الطلبات المحمية.\n\n**أسبوع 7:** عنوان المركز + فلتر نسائي/رجالي في centers/public.\n\n**أسبوع 8 يوم 1:** مجلد 10 — Sessions (CRUD حصص).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 — System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/health",
+            "description": "✅ يعمل من اليوم 1"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1 — Auth",
+      "item": [
+        {
+          "name": "Login — Center Admin (phone)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "if (res.data?.token) {",
+                  "  pm.environment.set('token', res.data.token);",
+                  "}",
+                  "if (res.data?.user?.id) {",
+                  "  pm.environment.set('userId', res.data.user.id);",
+                  "}",
+                  "if (res.data?.user?.centerProfile?.id) {",
+                  "  pm.environment.set('centerId', res.data.user.centerProfile.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{centerAdminPhone}}\",\n  \"password\": \"{{centerAdminPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "دخول مشرف المركز بالهاتف.\nيعمل مع حساب seed أو بعد Register → Verify."
+          },
+          "response": []
+        },
+        {
+          "name": "Login — Student (idNumber)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('role student', () => pm.expect(res.data.user.role).to.eql('student'));",
+                  "pm.test('studentProfile present', () => pm.expect(res.data.user.studentProfile).to.be.an('object'));",
+                  "if (res.data?.token) pm.environment.set('token', res.data.token);",
+                  "if (res.data?.user?.studentProfile?.id) pm.environment.set('studentId', res.data.user.studentProfile.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idNumber\": \"{{studentIdNumber}}\",\n  \"password\": \"{{studentPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "الأسبوع 3 — دخول الطالبة بالهوية الوطنية (بعد Approve Request)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login — Student (phone)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('role student', () => pm.expect(res.data.user.role).to.eql('student'));",
+                  "if (res.data?.token) pm.environment.set('token', res.data.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{studentPhone}}\",\n  \"password\": \"{{studentPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "الأسبوع 3 — دخول الطالبة بالهاتف (بعد Approve Request)."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Login student before approve (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "const res = pm.response.json();",
+                  "pm.test('pending message', () => pm.expect(res.error).to.include('بانتظار'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idNumber\": \"{{edgePendingIdNumber}}\",\n  \"password\": \"{{studentPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "حالة حافة — دخول طالبة قبل موافقة المركز.\nشغّلي أولاً: Edge Setup — Pending for login test (في مجلد 4)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2 — Account",
+      "item": [
+        {
+          "name": "Get Account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has user', () => pm.expect(res.data.user).to.be.an('object'));",
+                  "pm.test('has center', () => pm.expect(res.data.center).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/account",
+            "description": "أسبوع 6 — بيانات الحساب والمركز (يتطلب token)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has center', () => pm.expect(res.data.center).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supervisorName\": \"اسم المشرف\",\n  \"email\": \"center@example.com\"\n}"
+            },
+            "url": "{{baseUrl}}/api/account",
+            "description": "أسبوع 6 — تعديل بيانات المركز والبريد."
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('password changed', () => pm.expect(res.data.message).to.include('تم تغيير'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{centerAdminPassword}}\",\n  \"newPassword\": \"654321\"\n}"
+            },
+            "url": "{{baseUrl}}/api/account/password",
+            "description": "أسبوع 6 — تغيير كلمة المرور."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3 — Center Registration",
+      "item": [
+        {
+          "name": "Register Center",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "if (res.data?.phone) {",
+                  "  pm.environment.set('newCenterPhone', res.data.phone);",
+                  "  pm.environment.set('pendingCenterPhone', res.data.phone);",
+                  "}",
+                  "if (res.data?.devCode) {",
+                  "  console.log('devCode (development):', res.data.devCode);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"center@example.com\",\n  \"phone\": \"{{newCenterPhone}}\",\n  \"password\": \"{{newCenterPassword}}\",\n  \"centerName\": \"مركز تجريبي\",\n  \"supervisorName\": \"مشرف المركز\",\n  \"specializations\": [\"mutor\", \"dawa\"]\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register-center",
+            "description": "الأسبوع 2 — تسجيل مركز جديد.\n\n**الاستجابة المتوقعة (201):** message + phone + devCode (7890 في development فقط).\n\nيحفظ `newCenterPhone` تلقائياً للخطوة التالية."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Center (OTP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "if (res.data?.token) {",
+                  "  pm.environment.set('token', res.data.token);",
+                  "}",
+                  "if (res.data?.user?.id) {",
+                  "  pm.environment.set('userId', res.data.user.id);",
+                  "}",
+                  "if (res.data?.user?.centerProfile?.id) {",
+                  "  pm.environment.set('centerId', res.data.user.centerProfile.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{newCenterPhone}}\",\n  \"code\": \"7890\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/verify-center",
+            "description": "الأسبوع 2 — تحقق OTP.\n\nفي التطوير استخدمي الكود **7890** (من DEV_VERIFICATION_CODE).\n\nبعد النجاح يُحفظ token تلقائياً."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Register duplicate phone (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "const res = pm.response.json();",
+                  "pm.test('error message', () => pm.expect(res.error).to.include('مسجل'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"dup@example.com\",\n  \"phone\": \"{{newCenterPhone}}\",\n  \"password\": \"123456\",\n  \"centerName\": \"مركز مكرر\",\n  \"supervisorName\": \"مشرف\",\n  \"specializations\": [\"mutor\"]\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register-center",
+            "description": "حالة حافة — تسجيل بنفس الهاتف مرتين → 409."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Verify wrong code (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const res = pm.response.json();",
+                  "pm.test('error message', () => pm.expect(res.error).to.include('غير صحيح'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{newCenterPhone}}\",\n  \"code\": \"0000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/verify-center",
+            "description": "حالة حافة — كود خاطئ → 400.\n\n**الترتيب:** شغّلي Register Center أولاً (بدون Verify) ثم هذا الطلب."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Login before verify (403)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// سجّلي مركزاً جديداً أولاً عبر Register Center بهاتف فريد",
+                  "// ثم شغّلي هذا الطلب قبل Verify Center"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "const res = pm.response.json();",
+                  "pm.test('not activated', () => pm.expect(res.error).to.include('غير مفعّل'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{pendingCenterPhone}}\",\n  \"password\": \"{{newCenterPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "حالة حافة — login قبل verify → 403.\n\n**الترتيب:**\n1. Register Center بهاتف جديد (يُحفظ في pendingCenterPhone يدوياً أو عبر prerequest)\n2. شغّلي هذا الطلب **قبل** Verify Center\n3. المتوقع: 403 — الحساب غير مفعّل"
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Verify without register (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "const res = pm.response.json();",
+                  "pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"0599999999\",\n  \"code\": \"7890\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/verify-center",
+            "description": "حالة حافة — verify بدون register → 404."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4 — Registration Requests (طالبات)",
+      "item": [
+        {
+          "name": "List Public Centers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has centers', () => pm.expect(res.data.length).to.be.at.least(1));",
+                  "pm.test('has address fields', () => {",
+                  "  pm.expect(res.data[0]).to.have.property('addressText');",
+                  "  pm.expect(res.data[0]).to.have.property('city');",
+                  "  pm.expect(res.data[0]).to.have.property('genderAudience');",
+                  "});",
+                  "if (res.data?.[0]?.id) pm.environment.set('centerId', res.data[0].id);",
+                  "if (res.data?.[1]?.id) pm.environment.set('otherCenterId', res.data[1].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/centers/public",
+            "description": "أسبوع 7 — قائمة المراكز النشطة مع العنوان و genderAudience."
+          },
+          "response": []
+        },
+        {
+          "name": "List Public Centers — Female",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('only female centers', () => {",
+                  "  const bad = (res.data || []).filter(c => c.genderAudience !== 'female');",
+                  "  pm.expect(bad.length).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/centers/public?audience=female",
+            "description": "أسبوع 7 — فلتر نسائي فقط (بدون مختلط)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Public Centers — Male",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('only male centers', () => {",
+                  "  const bad = (res.data || []).filter(c => c.genderAudience !== 'male');",
+                  "  pm.expect(bad.length).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/centers/public?audience=male",
+            "description": "أسبوع 7 — فلتر رجالي فقط (بدون مختلط)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Levels by Center",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has levels', () => pm.expect(res.data.length).to.be.at.least(2));",
+                  "if (res.data?.[0]?.id) pm.environment.set('levelId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/levels?centerId={{centerId}}",
+            "description": "الأسبوع 3 — مستويات الحفظ للمركز (8 مطور + دورات + استماع = 10 لمراكز seed)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Levels — Other Center (setup)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "if (res.data?.[0]?.id) pm.environment.set('otherCenterLevelId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/levels?centerId={{otherCenterId}}",
+            "description": "إعداد — مستوى لمركز ثانٍ (لحالات الحافة). شغّلي بعد List Public Centers."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Request (طالبة — عام)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('status pending', () => pm.expect(res.data.status).to.eql('pending'));",
+                  "pm.test('has message', () => pm.expect(res.data.message).to.be.a('string'));",
+                  "if (res.data?.id) pm.environment.set('registrationRequestId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"نورة العتيبي\",\n  \"idNumber\": \"{{studentIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{studentPhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests",
+            "description": "الأسبوع 3 — طلب تسجيل طالبة.\n**idNumber ثابت** — لا يتغير بعد الموافقة."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Request — track courses (201) [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"اختبار كلمة المرور\",\n  \"idNumber\": \"001999888779\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"courses\",\n  \"phone\": \"0599111224\",\n  \"password\": \"123456\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests",
+            "description": "الأسبوع 3 — طلب تسجيل طالبة.\n**idNumber ثابت** — لا يتغير بعد الموافقة."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Password with letters (400) [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"اختبار كلمة المرور\",\n  \"idNumber\": \"001999888777\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"0599111222\",\n  \"password\": \"abc123\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests",
+            "description": "الأسبوع 3 — طلب تسجيل طالبة.\n**idNumber ثابت** — لا يتغير بعد الموافقة."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Missing track (400) [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"اختبار كلمة المرور\",\n  \"idNumber\": \"001999888778\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"phone\": \"0599111223\",\n  \"password\": \"123456\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests",
+            "description": "الأسبوع 3 — طلب تسجيل طالبة.\n**idNumber ثابت** — لا يتغير بعد الموافقة."
+          },
+          "response": []
+        },
+        {
+          "name": "List Requests (pending)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('array response', () => pm.expect(res.data).to.be.an('array'));",
+                  "if (res.data?.[0]?.id && !pm.environment.get('registrationRequestId')) {",
+                  "  pm.environment.set('registrationRequestId', res.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/registration-requests?status=pending",
+            "description": "الأسبوع 3 — قائمة الطلبات المعلقة (مركز فقط)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Request by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has id', () => pm.expect(res.data.id).to.eql(pm.environment.get('registrationRequestId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}",
+            "description": "الأسبوع 3 — تفاصيل طلب واحد."
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('student created', () => pm.expect(res.data.studentId).to.be.a('string'));",
+                  "if (res.data?.studentId) {",
+                  "  pm.environment.set('studentId', res.data.studentId);",
+                  "  pm.environment.set('approvedRegistrationRequestId', pm.environment.get('registrationRequestId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"levelId\": \"{{levelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}/approve",
+            "description": "الأسبوع 3 — موافقة المركز → إنشاء Student + User."
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('rejected', () => pm.expect(res.data.status).to.eql('rejected'));",
+                  "if (res.data?.id) pm.environment.set('rejectedRegistrationRequestId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"بيانات غير مكتملة\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}/reject",
+            "description": "الأسبوع 3 — رفض الطلب مع سبب.\n⚠️ لا تشغّلي بعد Approve في نفس التسلسل — استخدمي طلب pending منفصل."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge cases (أسبوع 3)",
+          "item": [
+            {
+              "name": "Edge Setup — Pending for duplicate test",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Setup 201', () => pm.response.to.have.status(201));",
+                      "if (res.data?.id) pm.environment.set('edgeDuplicateRequestId', res.data.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة تكرار\",\n  \"idNumber\": \"{{edgeDuplicateIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{edgeDuplicatePhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "إعداد — طلب pending لاختبار تكرار الهوية."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Submit duplicate idNumber (409)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                      "const res = pm.response.json();",
+                      "pm.test('duplicate pending', () => pm.expect(res.error).to.match(/معلق|مسجل/));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة تكرار ٢\",\n  \"idNumber\": \"{{edgeDuplicateIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"0598764322\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "حالة حافة — نفس الهوية مرتين (pending) → 409."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Submit after approved idNumber (409)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                      "const res = pm.response.json();",
+                      "pm.test('already registered', () => pm.expect(res.error).to.include('مسجل'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"نورة مكررة\",\n  \"idNumber\": \"{{studentIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"0598764999\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "حالة حافة — هوية طالبة موافق عليها مسبقاً → 409.\nيتطلب تشغيل Submit + Approve للطالبة الافتراضية أولاً."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Approve already processed (409)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                      "const res = pm.response.json();",
+                      "pm.test('already processed', () => pm.expect(res.error).to.include('معالجة'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"levelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests/{{approvedRegistrationRequestId}}/approve",
+                "description": "حالة حافة — موافقة على طلب معالج مسبقاً → 409.\nيتطلب Approve Request ناجح أولاً (يحفظ approvedRegistrationRequestId)."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge Setup — Submit to other center",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Setup 201', () => pm.response.to.have.status(201));",
+                      "if (res.data?.id) pm.environment.set('otherCenterRegistrationRequestId', res.data.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة مركز آخر\",\n  \"idNumber\": \"{{edgeOtherCenterIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{edgeOtherCenterPhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{otherCenterId}}\",\n  \"requestedLevelId\": \"{{otherCenterLevelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "إعداد — طلب لمركز ثانٍ. شغّلي List Public Centers + List Levels — Other Center أولاً."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Approve other center request (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                      "const res = pm.response.json();",
+                      "pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"levelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests/{{otherCenterRegistrationRequestId}}/approve",
+                "description": "حالة حافة — مشرف مركز تجريبي يوافق على طلب مركز آخر → 404.\nشغّلي Login Center Admin ثم Edge Setup — Submit to other center."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge Setup — Pending for login test",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Setup 201', () => pm.response.to.have.status(201));",
+                      "if (res.data?.id) pm.environment.set('edgePendingRequestId', res.data.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة قبل الموافقة\",\n  \"idNumber\": \"{{edgePendingIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{edgePendingPhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "إعداد — طلب pending لاختبار Login قبل الموافقة (403 في مجلد Auth)."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge Setup — Pending for reject test",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Setup 201', () => pm.response.to.have.status(201));",
+                      "if (res.data?.id) pm.environment.set('edgeRejectRequestId', res.data.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة للرفض\",\n  \"idNumber\": \"{{edgeRejectIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{edgeRejectPhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "إعداد — طلب pending لاختبار رفض بدون سبب."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Reject without reason (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "const res = pm.response.json();",
+                      "pm.test('reason required', () => pm.expect(res.error).to.include('سبب'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests/{{edgeRejectRequestId}}/reject",
+                "description": "حالة حافة — رفض بدون سبب → 400.\nشغّلي Login Center Admin ثم Edge Setup — Pending for reject test."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge Setup — Pending for wrong level test",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Setup 201', () => pm.response.to.have.status(201));",
+                      "if (res.data?.id) pm.environment.set('edgeWrongLevelRequestId', res.data.id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fullName\": \"طالبة مستوى خاطئ\",\n  \"idNumber\": \"{{edgeWrongLevelIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"{{edgeWrongLevelPhone}}\",\n  \"password\": \"{{studentPassword}}\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{centerId}}\",\n  \"requestedLevelId\": \"{{levelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests",
+                "description": "إعداد — طلب pending لاختبار levelId من مركز آخر."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Approve invalid levelId (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "const res = pm.response.json();",
+                      "pm.test('invalid level', () => pm.expect(res.error).to.match(/مستوى|صالح/));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"levelId\": \"{{otherCenterLevelId}}\"\n}"
+                },
+                "url": "{{baseUrl}}/api/registration-requests/{{edgeWrongLevelRequestId}}/approve",
+                "description": "حالة حافة — levelId من مركز آخر → 400.\nشغّلي Login + List Levels — Other Center + Edge Setup — Pending for wrong level test."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 — Students",
+      "item": [
+        {
+          "name": "List Students",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has students', () => pm.expect(res.data.length).to.be.at.least(1));",
+                  "pm.test('list item shape', () => {",
+                  "  const item = res.data[0];",
+                  "  pm.expect(item).to.have.property('id');",
+                  "  pm.expect(item).to.have.property('fullName');",
+                  "  pm.expect(item).to.have.property('levelName');",
+                  "  pm.expect(item).to.have.property('status', 'regular');",
+                  "});",
+                  "if (res.data?.[0]?.id) pm.environment.set('studentId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/students?search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "students"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "أسبوع 4 — قائمة طالبات المركز (مشرف فقط).\nيملأ `studentId` تلقائياً.\nشغّلي Login — Center Admin أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "List Students — Search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('array response', () => pm.expect(res.data).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/students?search=نورة",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "students"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "نورة"
+                }
+              ]
+            },
+            "description": "أسبوع 4 — بحث بالاسم (اختياري)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Student by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has profile fields', () => {",
+                  "  pm.expect(res.data.id).to.eql(pm.environment.get('studentId'));",
+                  "  pm.expect(res.data).to.have.property('idNumber');",
+                  "  pm.expect(res.data).to.have.property('level');",
+                  "  pm.expect(res.data.grades).to.be.an('array');",
+                  "  pm.expect(res.data.attendanceCalendar).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/students/{{studentId}}",
+            "description": "أسبوع 4 — ملف الطالبة.\nشغّلي List Students أولاً لملء `studentId`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Profile (Student)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('student profile', () => {",
+                  "  pm.expect(res.data).to.have.property('id');",
+                  "  pm.expect(res.data).to.have.property('fullName');",
+                  "  pm.expect(res.data).to.have.property('levelName');",
+                  "  pm.expect(res.data).to.have.property('centerName');",
+                  "  pm.expect(res.data.center).to.be.an('object');",
+                  "  pm.expect(res.data.attendanceCalendar).to.be.an('array');",
+                  "});",
+                  "if (res.data?.id) pm.environment.set('studentId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/students/me",
+            "description": "أسبوع 6 — ملف الطالبة الحالية.\nشغّلي Login — Student (idNumber) أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Student (يدوي — تمهيدي) [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) pm.environment.set('manualStudentId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"طالبة يدوية تمهيدي\",\n  \"idNumber\": \"001999000111\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"0599000111\",\n  \"password\": \"123456\",\n  \"dob\": \"2010-01-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/students",
+            "description": "أسبوع 9ب يوم 2 — إضافة طالبة يدوياً؛ المستوى التمهيدي افتراضي إن لم يُمرَّر levelId."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Student",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"نورة العتيبي\",\n  \"phone\": \"0592222222\"\n}"
+            },
+            "url": "{{baseUrl}}/api/students/{{studentId}}",
+            "description": "قريباً — تعديل بيانات (idNumber لا يُعدَّل)."
+          },
+          "response": []
+        },
+        {
+          "name": "Student Grades",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has grades array', () => pm.expect(res.data.grades).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/students/{{studentId}}/grades",
+            "description": "أسبوع 5 — درجات الطالبة عبر كل المواد.\nشغّلي Login + List Students أو Level Students أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "Student Attendance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has calendar', () => pm.expect(res.data.calendar).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/students/{{studentId}}/attendance",
+            "description": "أسبوع 5 — حضور الطالبة (آخر 30 يوماً + تقويم).\nشغّلي Login + List Students أو Level Students أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge cases (أسبوع 4)",
+          "item": [
+            {
+              "name": "Edge Setup — other center student id",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                      "pm.test('otherCenterId set', () => pm.expect(pm.environment.get('otherCenterId')).to.be.a('string').and.not.empty);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/api/centers/public",
+                "description": "إعداد — شغّلي `npm run seed` وانسخي `otherCenterStudentId` من الـ terminal إلى Environment.\nثم شغّلي List Public Centers لملء `otherCenterId`."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Invalid student id (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "pm.test('invalid id message', () => pm.expect(res.error).to.include('غير صالح'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/api/students/badid",
+                "description": "حالة حافة — معرّف غير صالح → 400.\nشغّلي Login — Center Admin أولاً."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Student not found (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                      "pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/api/students/507f1f77bcf86cd799439011",
+                "description": "حالة حافة — ObjectId صالح لكن غير موجود → 404."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Student other center (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                      "pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/api/students/{{otherCenterStudentId}}",
+                "description": "حالة حافة — طالبة من مركز آخر (مركز النور) → 404.\n1) `npm run seed` → انسخي `otherCenterStudentId` إلى Environment\n2) Login — Center Admin (مركز تجريبي)"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Update Enrollment Status [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enrollmentStatus\": \"graduated\"\n}"
+            },
+            "url": "{{baseUrl}}/api/students/{{studentId}}/enrollment-status",
+            "description": "مشرف يعيّن enrolled | graduated | suspended"
+          }
+        },
+        {
+          "name": "Promote Student (mutor) [9ب]",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has level', () => pm.expect(res.data).to.have.property('levelName'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/api/students/{{studentId}}/promote",
+            "description": "أسبوع 9ب يوم 5 — ترقية يدوية لمسار المطور للمستوى التالي.\nالترم ≈ 3 أشهر كقاعدة منتج (بدون أتمتة).\nعند المستوى 8 → 400 مع توجيه لتعيين خريجة."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6 — Levels",
+      "item": [
+        {
+          "name": "List Levels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has levels', () => pm.expect(res.data.length).to.be.at.least(1));",
+                  "pm.test('has studentCount', () => pm.expect(res.data[0]).to.have.property('studentCount'));",
+                  "if (res.data?.[0]?.id) pm.environment.set('levelId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/levels?centerId={{centerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "levels"
+              ],
+              "query": [
+                {
+                  "key": "centerId",
+                  "value": "{{centerId}}"
+                }
+              ]
+            },
+            "description": "أسبوع 4 — مستويات المركز مع `studentCount`.\nتأكدي أن `centerId` مضبوط (Login — Center Admin)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Level by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('level detail', () => {",
+                  "  pm.expect(res.data.id).to.eql(pm.environment.get('levelId'));",
+                  "  pm.expect(res.data).to.have.property('studentCount');",
+                  "  pm.expect(res.data).to.have.property('centerId');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/levels/{{levelId}}",
+            "description": "أسبوع 4 — تفاصيل مستوى واحد.\nشغّلي List Levels أولاً لملء `levelId`."
+          },
+          "response": []
+        },
+        {
+          "name": "Level Students",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('array response', () => pm.expect(res.data).to.be.an('array'));",
+                  "if (res.data?.[0]?.id) pm.environment.set('studentId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/levels/{{levelId}}/students",
+            "description": "أسبوع 4 — طالبات المستوى.\nشغّلي List Levels أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Level",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('level created', () => {",
+                  "  pm.expect(res.data).to.have.property('id');",
+                  "  pm.expect(res.data.fullName).to.eql('المستوى التاسع مطور');",
+                  "  pm.expect(res.data.order).to.eql(11);",
+                  "});",
+                  "if (res.data?.id) pm.environment.set('levelId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"المستوى التاسع مطور\",\n  \"shortName\": \"مستوى مطور ٩\",\n  \"order\": 11\n}"
+            },
+            "url": "{{baseUrl}}/api/levels",
+            "description": "أسبوع 6 — إضافة مستوى جديد.\nشغّلي Login — Center Admin أولاً.\n`order` يجب ألا يتكرر لنفس المركز."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Invalid level id (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('invalid id message', () => pm.expect(res.error).to.include('غير صالح'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/levels/badid",
+            "description": "حالة حافة — معرّف مستوى غير صالح → 400."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7 — Attendance",
+      "item": [
+        {
+          "name": "Get Attendance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has records', () => pm.expect(res.data.records).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/attendance?levelId={{levelId}}&subjectIndex=0&date=2026-07-08",
+            "description": "أسبوع 5 — تحضير يوم لمستوى ومادة.\nشغّلي Login + List Levels + Level Students أولاً."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Attendance (bulk)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"date\": \"2026-07-08\",\n  \"records\": [\n    { \"studentId\": \"{{studentId}}\", \"status\": \"present\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/attendance/bulk",
+            "description": "أسبوع 5 — حفظ تحضير جماعي.\nاستخدمي Level Students لملء `studentId` من نفس المستوى."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge cases (أسبوع 5)",
+          "item": [
+            {
+              "name": "Edge — Missing date (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "pm.test('date required', () => pm.expect(res.error).to.include('التاريخ'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/api/attendance?levelId={{levelId}}&subjectIndex=0",
+                "description": "حالة حافة — تاريخ فارغ → 400."
+              },
+              "response": []
+            },
+            {
+              "name": "Edge — Empty bulk (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "pm.test('records required', () => pm.expect(res.error).to.include('سجل'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"date\": \"2026-07-08\",\n  \"records\": []\n}"
+                },
+                "url": "{{baseUrl}}/api/attendance/bulk",
+                "description": "حالة حافة — bulk فارغ → 400."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8 — Grades",
+      "item": [
+        {
+          "name": "Get Grades",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('has records', () => pm.expect(res.data.records).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/grades?levelId={{levelId}}&subjectIndex=0",
+            "description": "أسبوع 5 — درجات مستوى ومادة."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Grades (bulk)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"records\": [\n    {\n      \"studentId\": \"{{studentId}}\",\n      \"breakdown\": {\n        \"attendance\": 20,\n        \"shortExam\": 18,\n        \"participation\": 15,\n        \"final\": 40\n      }\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/grades/bulk",
+            "description": "أسبوع 5 — حفظ درجات جماعي.\nاستخدمي Level Students لملء `studentId` من نفس المستوى."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge cases (أسبوع 5)",
+          "item": [
+            {
+              "name": "Edge — Empty bulk (400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                      "pm.test('records required', () => pm.expect(res.error).to.include('درجة'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"records\": []\n}"
+                },
+                "url": "{{baseUrl}}/api/grades/bulk",
+                "description": "حالة حافة — bulk فارغ → 400."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9 — Settings",
+      "item": [
+        {
+          "name": "Get Settings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has gradeWeights', () => pm.expect(res.data.gradeWeights).to.be.an('object'));",
+                  "pm.test('has centerProfile', () => pm.expect(res.data.centerProfile).to.be.an('object'));",
+                  "pm.test('centerProfile has addressText', () => pm.expect(res.data.centerProfile).to.have.property('addressText'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/settings",
+            "description": "أسبوع 7 — إعدادات المركز (أوزان + عنوان بدون خريطة)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Center Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has addressText', () => pm.expect(res.data).to.have.property('addressText'));",
+                  "pm.test('has city', () => pm.expect(res.data).to.have.property('city'));",
+                  "pm.test('has nameAr', () => pm.expect(res.data.nameAr).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/settings/center-profile",
+            "description": "أسبوع 7 — قراءة عنوان المركز (نص فقط)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Center Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));",
+                  "pm.test('city saved', () => pm.expect(res.data.city).to.eql('الرياض'));",
+                  "pm.test('genderAudience saved', () => pm.expect(res.data.genderAudience).to.eql('female'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"addressText\": \"شارع الملك فهد، حي النسيم، بجوار مسجد الفرقان\",\n  \"city\": \"الرياض\",\n  \"genderAudience\": \"female\"\n}"
+            },
+            "url": "{{baseUrl}}/api/settings/center-profile",
+            "description": "أسبوع 7 — تحديث عنوان المركز (بدون خريطة)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Grade Weights",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(res.success).to.eql(true));",
+                  "pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendance\": 20,\n  \"shortExam\": 20,\n  \"participation\": 20,\n  \"final\": 40\n}"
+            },
+            "url": "{{baseUrl}}/api/settings/grade-weights",
+            "description": "أسبوع 6 — تعديل أوزان الدرجات (المجموع = 100)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 — Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('array', () => pm.expect(res.data).to.be.an('array'));",
+                  "if (res.data?.[0]?.id) pm.environment.set('sessionId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/sessions",
+            "description": "أسبوع 8 — قائمة حصص المركز."
+          },
+          "response": []
+        },
+        {
+          "name": "List My Sessions (Student)",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{studentToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "me"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "كل حصص مركز الطالبة مع isMyLevel لحصص مستواها"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('has id', () => pm.expect(res.data.id).to.be.a('string'));",
+                  "if (res.data?.id) pm.environment.set('sessionId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"title\": \"حصة تجريبية — Postman\",\n  \"startAt\": \"2030-01-06T10:00:00.000Z\",\n  \"endAt\": \"2030-01-06T11:00:00.000Z\",\n  \"mode\": \"online\",\n  \"zoomUrl\": \"https://zoom.us/j/9999999999\",\n  \"teacherName\": \"مشرف المركز\",\n  \"notes\": \"من Postman\"\n}"
+            },
+            "url": "{{baseUrl}}/api/sessions",
+            "description": "أسبوع 8 — إنشاء حصة."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Session by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has title', () => pm.expect(res.data.title).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}",
+            "description": "أسبوع 8 — تفاصيل حصة."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('saved', () => pm.expect(res.data.message).to.include('تم تحديث'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"حصة محدّثة — Postman\",\n  \"status\": \"scheduled\",\n  \"notes\": \"تم التحديث\"\n}"
+            },
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}",
+            "description": "أسبوع 8 — تحديث حصة."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('deleted', () => pm.expect(res.data.message).to.include('تم حذف'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}",
+            "description": "أسبوع 8 — حذف حصة."
+          },
+          "response": []
+        },
+        {
+          "name": "Edge — Create online without zoom",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"levelId\": \"{{levelId}}\",\n  \"subjectIndex\": 0,\n  \"title\": \"أونلاين بدون زوم\",\n  \"startAt\": \"2030-02-01T10:00:00.000Z\",\n  \"endAt\": \"2030-02-01T11:00:00.000Z\",\n  \"mode\": \"online\"\n}"
+            },
+            "url": "{{baseUrl}}/api/sessions",
+            "description": "حالة حافة — online بدون zoomUrl → 400."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Session Attendance (Student)",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{studentToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}/attendance/me",
+            "description": "حالة الطالبة في كشف التحضير (مستوى + مادة + تاريخ الحصة)"
+          },
+          "response": []
+        },
+        {
+          "name": "Check In to Session (Student)",
+          "event": [],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{studentToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"present\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}/check-in",
+            "description": "تسجيل ذاتي في كشف التحضير — status: present"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Session — Teacher Apology",
+          "event": [],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"ظرف طارئ للمعلمة — تُعاد جدولة الحصة لاحقاً\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/sessions/{{sessionId}}/cancel",
+            "description": "اعتذار المعلمة: status=cancelled + cancelReason. الإشعار Push يوم 3."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10b — Class Offers",
+      "item": [
+        {
+          "name": "List Class Offers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('array', () => pm.expect(res.data).to.be.an('array'));",
+                  "if (res.data?.[0]?.id) pm.environment.set('classOfferId', res.data[0].id);",
+                  "if (res.data?.[0]?.nextSessionId) pm.environment.set('sessionId', res.data[0].nextSessionId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/class-offers",
+            "description": "قائمة فصول المركز (مطور + دورة)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Class Offer — Mutor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('track mutor', () => pm.expect(res.data.track).to.eql('mutor'));",
+                  "if (res.data?.id) pm.environment.set('classOfferId', res.data.id);",
+                  "if (res.data?.nextSessionId) pm.environment.set('sessionId', res.data.nextSessionId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"track\": \"mutor\",\n  \"levelId\": \"{{levelId}}\",\n  \"subjectName\": \"السيرة\",\n  \"mode\": \"in_person\",\n  \"weekday\": 0,\n  \"startTime\": \"10:00\",\n  \"endTime\": \"11:00\",\n  \"teacherName\": \"أ. نورة\",\n  \"gradeWeights\": { \"attendance\": 20, \"shortExam\": 20, \"participation\": 20, \"final\": 40 }\n}"
+            },
+            "url": "{{baseUrl}}/api/class-offers",
+            "description": "إنشاء فصل مطور — يلزم levelId من مستويات ١–٨."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Class Offer — Course",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('no level', () => pm.expect(res.data.levelId).to.eql(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"track\": \"courses\",\n  \"subjectName\": \"العقيدة\",\n  \"mode\": \"online\",\n  \"weekday\": 2,\n  \"startTime\": \"16:00\",\n  \"endTime\": \"17:00\",\n  \"teacherName\": \"أ. هند\",\n  \"gradeWeights\": { \"attendance\": 20, \"shortExam\": 20, \"participation\": 20, \"final\": 40 }\n}"
+            },
+            "url": "{{baseUrl}}/api/class-offers",
+            "description": "إنشاء فصل دورة — بلا مستوى."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Class Offer by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/class-offers/{{classOfferId}}",
+            "description": "تفاصيل فصل."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Class Offer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/class-offers/{{classOfferId}}",
+            "description": "حذف فصل وحصصه المرتبطة."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10c — Courses (دورات علمية)",
+      "item": [
+        {
+          "name": "List Courses",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "courses"
+              ]
+            },
+            "description": "قائمة الدورات العلمية للمركز"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Course",
+          "event": [],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "courses"
+              ]
+            },
+            "description": "إنشاء دورة بالاسم",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"أعمال القلوب\",\n  \"description\": \"دورة تجريبية\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Course by ID",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "تفاصيل دورة"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Course",
+          "event": [],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"أعمال القلوب (محدث)\",\n  \"description\": \"وصف محدث\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Course",
+          "event": [],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "حذف دورة وما يرتبط بها من عروض/حصص"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11 — Devices & Notifications",
+      "item": [
+        {
+          "name": "Register Device",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{studentToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expoPushToken\": \"ExponentPushToken[test-token-from-postman]\",\n  \"platform\": \"ios\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/devices/register",
+            "description": "تسجيل Expo Push Token. التوكن التجريبي يُقبل في الـ API لكن Expo لن يرسل له فعلياً."
+          },
+          "response": []
+        },
+        {
+          "name": "List My Notifications (Student)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{studentToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/notifications/me",
+            "description": "Inbox: قبول التسجيل + اعتذار المعلمة"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12 — Account Deletion (9ب)",
+      "item": [
+        {
+          "name": "Submit Deletion Request — Student",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"أرغب بالانتقال لمركز آخر\"\n}"
+            },
+            "url": "{{baseUrl}}/api/account-deletion-requests",
+            "description": "يتطلب توكن طالبة نشطة"
+          }
+        },
+        {
+          "name": "List Pending Deletion Requests — Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/account-deletion-requests?status=pending"
+          }
+        },
+        {
+          "name": "Approve Deletion Request — Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/account-deletion-requests/{{deletionRequestId}}/approve",
+            "description": "عيّني deletionRequestId من List"
+          }
+        },
+        {
+          "name": "Edge — Second center registration while active (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"محاولة مركز ثانٍ\",\n  \"idNumber\": \"{{studentIdNumber}}\",\n  \"gender\": \"female\",\n  \"nationality\": \"{{studentNationality}}\",\n  \"academicLevel\": \"{{studentAcademicLevel}}\",\n  \"track\": \"mutor\",\n  \"phone\": \"0599111999\",\n  \"password\": \"123456\",\n  \"dob\": \"2010-05-15\",\n  \"centerId\": \"{{otherCenterId}}\",\n  \"requestedLevelId\": \"{{otherCenterLevelId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/registration-requests",
+            "description": "هوية seed النشطة تُرفض لمركز آخر"
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 — Suspension Requests (9ب)",
+      "item": [
+        {
+          "name": "Submit Suspension Request — Student",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) pm.environment.set('suspensionRequestId', res.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"ظروف خاصة\"\n}"
+            },
+            "url": "{{baseUrl}}/api/suspension-requests"
+          }
+        },
+        {
+          "name": "List Pending Suspension Requests — Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "if (Array.isArray(res.data) && res.data[0]?.id) pm.environment.set('suspensionRequestId', res.data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/suspension-requests?status=pending"
+          }
+        },
+        {
+          "name": "Approve Suspension Request — Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/suspension-requests/{{suspensionRequestId}}/approve"
+          }
+        },
+        {
+          "name": "Reject Suspension Request — Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"غير مناسب حالياً\"\n}"
+            },
+            "url": "{{baseUrl}}/api/suspension-requests/{{suspensionRequestId}}/reject"
+          }
+        },
+        {
+          "name": "Edge — Login suspended student (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idNumber\": \"{{studentIdNumber}}\",\n  \"password\": \"{{studentPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "بعد Approve Suspension على طالبة seed — توقع رسالة وقف القيد"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "centerAdminPhone",
+      "value": "0512345678",
+      "type": "string"
+    },
+    {
+      "key": "centerAdminPassword",
+      "value": "123456",
+      "type": "string"
+    },
+    {
+      "key": "studentIdNumber",
+      "value": "123456789012",
+      "type": "string"
+    },
+    {
+      "key": "studentPhone",
+      "value": "0598765497",
+      "type": "string"
+    },
+    {
+      "key": "studentPassword",
+      "value": "123456",
+      "type": "string"
+    },
+    {
+      "key": "studentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "levelId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "centerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "registrationRequestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "classOfferId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

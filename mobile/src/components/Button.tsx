@@ -74,10 +74,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
-    borderRadius: 4,
+    borderRadius: 999,
   },
   contained: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primaryDark,
   },
   outlined: {
     backgroundColor: "transparent",

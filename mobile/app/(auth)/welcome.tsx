@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import Animated, {
@@ -12,18 +12,19 @@ import Animated, {
 } from "react-native-reanimated";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import Button from "@/src/components/Button";
+import { colors, centerColors, spacing } from "@/constants";
 
 const WELCOME_COLORS = {
-  background: "#fafbfc",
-  navy: "#4a7ab5",
-  textPrimary: "#4a5568",
-  textSecondary: "#8b95a5",
-  bookGrey: "#c5d0dc",
-  orange: "#f5c49e",
-  greenLight: "#b8e0b0",
-  greenDark: "#6ba86b",
-  wave: "#e8ecf0",
-  glow: "#7ba3d4",
+  background: colors.background,
+  navy: colors.primary,
+  textPrimary: colors.text,
+  textSecondary: colors.textSecondary,
+  bookGrey: centerColors.cardBorder,
+  orange: centerColors.accentOrange,
+  greenLight: "#e8f5fd",
+  greenDark: colors.primary,
+  wave: centerColors.cardBorder,
+  glow: colors.primary,
 };
 
 export default function WelcomeScreen() {
@@ -101,6 +102,10 @@ export default function WelcomeScreen() {
   };
 
   const handleRegisterNow = () => {
+    router.push("/(auth)/register-student" as import("expo-router").Href);
+  };
+
+  const handleRegisterCenter = () => {
     router.push("/(auth)/register-center" as import("expo-router").Href);
   };
 
@@ -138,7 +143,7 @@ export default function WelcomeScreen() {
             <Animated.View style={[styles.blobGreenDark, animatedBlob2Style]} />
 
             <View style={styles.blueBox}>
-              <MaterialCommunityIcons name="school" size={72} color="#fff" />
+              <MaterialCommunityIcons name="school" size={72} color={colors.background} />
             </View>
           </Animated.View>
 
@@ -148,8 +153,8 @@ export default function WelcomeScreen() {
           <View style={styles.buttonWrapper}>
             <Button
               onPress={handleRegisterNow}
-              backgroundColor="#4a9b6f"
-              accessibilityLabel="سجل الآن - إنشاء حساب مركز"
+              backgroundColor={colors.primary}
+              accessibilityLabel="سجل الآن — تسجيل طالبة"
             >
               سجل الآن
             </Button>
@@ -165,6 +170,15 @@ export default function WelcomeScreen() {
           </View>
         </View>
       </View>
+
+      <Pressable
+        onPress={handleRegisterCenter}
+        style={styles.centerLink}
+        accessibilityRole="link"
+        accessibilityLabel="إنشاء حساب مركز"
+      >
+        <Text style={styles.centerLinkText}>إنشاء حساب مركز</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -299,5 +313,14 @@ const styles = StyleSheet.create({
   },
   secondButtonWrap: {
     marginTop: 12,
+  },
+  centerLink: {
+    alignSelf: "center",
+    marginBottom: spacing.xl,
+    padding: spacing.sm,
+  },
+  centerLinkText: {
+    fontSize: 14,
+    color: colors.textSecondary,
   },
 });

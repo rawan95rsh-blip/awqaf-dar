@@ -6,13 +6,21 @@ import ScreenContainer from "@/src/components/ScreenContainer";
 import Input from "@/src/components/Input";
 import Button from "@/src/components/Button";
 import { useAuth } from "@/src/context/AuthContext";
-import { loginApi } from "@/src/api/auth";
+import { buildLoginCredentials, loginApi } from "@/src/api/auth";
+import { promptEnableBiometricsAfterLogin } from "@/src/utils/biometric";
 import { colors, spacing } from "@/constants";
+
+function getPostLoginRoute(role?: string): Href {
+  if (role === "student") {
+    return "/(auth)/student-home" as Href;
+  }
+  return "/main" as Href;
+}
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuth();
-  const [phone, setPhone] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -20,13 +28,16 @@ export default function LoginScreen() {
     mutationFn: () =>
       new Promise<{ token: string; user: import("@/src/types/auth").User }>(
         (resolve, reject) => {
-          loginApi({ phone, password }, resolve, reject);
+          loginApi(buildLoginCredentials(identifier, password), resolve, reject);
         },
       ),
     onSuccess: (data) => {
       setError(null);
+      const destination = getPostLoginRoute(data.user.role);
       login(data.token, data.user, () => {
-        router.replace("/main" as Href);
+        promptEnableBiometricsAfterLogin(() => {
+          router.replace(destination);
+        });
       });
     },
     onError: (err: Error) => {
@@ -36,9 +47,9 @@ export default function LoginScreen() {
 
   const handleSubmit = () => {
     setError(null);
-    const trimmedPhone = phone.trim();
-    if (!trimmedPhone) {
-      setError("أدخل رقم الهاتف");
+    const trimmed = identifier.trim().replace(/\s/g, "");
+    if (!trimmed) {
+      setError("أدخلي رقم الهاتف أو الهوية المدنية");
       return;
     }
     if (!password) {
@@ -48,8 +59,8 @@ export default function LoginScreen() {
     mutation.mutate();
   };
 
-  const handlePhoneChange = (text: string) => {
-    setPhone(text);
+  const handleIdentifierChange = (text: string) => {
+    setIdentifier(text);
     if (error) setError(null);
   };
 
@@ -72,12 +83,12 @@ export default function LoginScreen() {
         <Text style={styles.title}>تسجيل الدخول</Text>
 
         <Input
-          value={phone}
-          onChangeText={handlePhoneChange}
-          placeholder="رقم الهاتف"
+          value={identifier}
+          onChangeText={handleIdentifierChange}
+          placeholder="رقم الهاتف أو الهوية المدنية (12 رقماً)"
           keyboardType="phone-pad"
           autoComplete="tel"
-          accessibilityLabel="رقم الهاتف"
+          accessibilityLabel="رقم الهاتف أو الهوية المدنية"
         />
         <Input
           value={password}
