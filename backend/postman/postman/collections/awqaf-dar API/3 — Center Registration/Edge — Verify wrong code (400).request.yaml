@@ -1,0 +1,26 @@
+$kind: http-request
+description: |-
+  حالة حافة — كود خاطئ → 400.
+
+  **الترتيب:** شغّلي Register Center أولاً (بدون Verify) ثم هذا الطلب.
+url: "{{baseUrl}}/api/auth/verify-center"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "phone": "{{newCenterPhone}}",
+      "code": "0000"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      const res = pm.response.json();
+      pm.test('error message', () => pm.expect(res.error).to.include('غير صحيح'));
+    language: text/javascript
+order: 4000

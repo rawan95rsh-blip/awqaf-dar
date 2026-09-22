@@ -1,0 +1,36 @@
+$kind: http-request
+description: |-
+  الأسبوع 3 — طلب تسجيل طالبة.
+  **idNumber ثابت** — لا يتغير بعد الموافقة.
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "نورة العتيبي",
+      "idNumber": "{{studentIdNumber}}",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "{{studentPhone}}",
+      "password": "{{studentPassword}}",
+      "dob": "2010-05-15",
+      "centerId": "{{centerId}}",
+      "requestedLevelId": "{{levelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('status pending', () => pm.expect(res.data.status).to.eql('pending'));
+      pm.test('has message', () => pm.expect(res.data.message).to.be.a('string'));
+      if (res.data?.id) pm.environment.set('registrationRequestId', res.data.id);
+    language: text/javascript
+order: 7000

@@ -1,0 +1,22 @@
+$kind: http-request
+description: |-
+  حالة حافة — رفض بدون سبب → 400.
+  شغّلي Login Center Admin ثم Edge Setup — Pending for reject test.
+url: "{{baseUrl}}/api/registration-requests/{{edgeRejectRequestId}}/reject"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "reason": ""
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      const res = pm.response.json();
+      pm.test('reason required', () => pm.expect(res.error).to.include('سبب'));
+    language: text/javascript
+order: 9000

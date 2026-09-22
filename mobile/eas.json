@@ -17,13 +17,13 @@
         "simulator": false
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE_WITH_PRODUCTION_API"
+        "EXPO_PUBLIC_API_URL": "https://awqaf-dar.onrender.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE_WITH_PRODUCTION_API"
+        "EXPO_PUBLIC_API_URL": "https://awqaf-dar.onrender.com"
       }
     }
   },

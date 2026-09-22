@@ -1,0 +1,17 @@
+$kind: http-request
+description: الأسبوع 3 — قائمة الطلبات المعلقة (مركز فقط).
+url: "{{baseUrl}}/api/registration-requests?status=pending"
+method: GET
+queryParams:
+  status: pending
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('array response', () => pm.expect(res.data).to.be.an('array'));
+      if (res.data?.[0]?.id && !pm.environment.get('registrationRequestId')) {
+        pm.environment.set('registrationRequestId', res.data[0].id);
+      }
+    language: text/javascript
+order: 11000

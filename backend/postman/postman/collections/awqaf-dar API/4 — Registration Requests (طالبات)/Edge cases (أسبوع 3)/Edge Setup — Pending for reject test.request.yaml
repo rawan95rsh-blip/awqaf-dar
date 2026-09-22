@@ -1,0 +1,32 @@
+$kind: http-request
+description: إعداد — طلب pending لاختبار رفض بدون سبب.
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "طالبة للرفض",
+      "idNumber": "{{edgeRejectIdNumber}}",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "{{edgeRejectPhone}}",
+      "password": "{{studentPassword}}",
+      "dob": "2010-05-15",
+      "centerId": "{{centerId}}",
+      "requestedLevelId": "{{levelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Setup 201', () => pm.response.to.have.status(201));
+      if (res.data?.id) pm.environment.set('edgeRejectRequestId', res.data.id);
+    language: text/javascript
+order: 8000

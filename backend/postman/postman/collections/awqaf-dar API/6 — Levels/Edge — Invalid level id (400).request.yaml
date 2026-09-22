@@ -1,0 +1,12 @@
+$kind: http-request
+description: حالة حافة — معرّف مستوى غير صالح → 400.
+url: "{{baseUrl}}/api/levels/badid"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('invalid id message', () => pm.expect(res.error).to.include('غير صالح'));
+    language: text/javascript
+order: 5000

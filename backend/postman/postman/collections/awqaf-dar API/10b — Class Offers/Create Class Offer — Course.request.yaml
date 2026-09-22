@@ -1,0 +1,27 @@
+$kind: http-request
+description: إنشاء فصل دورة — بلا مستوى.
+url: "{{baseUrl}}/api/class-offers"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "track": "courses",
+      "subjectName": "العقيدة",
+      "mode": "online",
+      "weekday": 2,
+      "startTime": "16:00",
+      "endTime": "17:00",
+      "teacherName": "أ. هند",
+      "gradeWeights": { "attendance": 20, "shortExam": 20, "participation": 20, "final": 40 }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('no level', () => pm.expect(res.data.levelId).to.eql(null));
+    language: text/javascript
+order: 3000

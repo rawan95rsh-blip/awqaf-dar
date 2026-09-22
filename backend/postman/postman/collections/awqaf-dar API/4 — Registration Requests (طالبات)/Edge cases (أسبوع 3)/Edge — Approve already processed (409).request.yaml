@@ -1,0 +1,22 @@
+$kind: http-request
+description: |-
+  حالة حافة — موافقة على طلب معالج مسبقاً → 409.
+  يتطلب Approve Request ناجح أولاً (يحفظ approvedRegistrationRequestId).
+url: "{{baseUrl}}/api/registration-requests/{{approvedRegistrationRequestId}}/approve"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 409', () => pm.response.to.have.status(409));
+      const res = pm.response.json();
+      pm.test('already processed', () => pm.expect(res.error).to.include('معالجة'));
+    language: text/javascript
+order: 4000

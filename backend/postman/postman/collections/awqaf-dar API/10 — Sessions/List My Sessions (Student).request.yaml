@@ -1,0 +1,14 @@
+$kind: http-request
+description: كل حصص مركز الطالبة مع isMyLevel لحصص مستواها
+url: "{{baseUrl}}/api/sessions/me"
+method: GET
+headers:
+  Authorization: Bearer {{studentToken}}
+queryParams:
+  - key: from
+    value: ""
+    disabled: true
+  - key: to
+    value: ""
+    disabled: true
+order: 2000

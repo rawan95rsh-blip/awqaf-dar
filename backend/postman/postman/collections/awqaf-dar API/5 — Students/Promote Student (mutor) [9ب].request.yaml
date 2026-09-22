@@ -1,0 +1,15 @@
+$kind: http-request
+description: |-
+  أسبوع 9ب يوم 5 — ترقية يدوية لمسار المطور للمستوى التالي.
+  الترم ≈ 3 أشهر كقاعدة منتج (بدون أتمتة).
+  عند المستوى 8 → 400 مع توجيه لتعيين خريجة.
+url: "{{baseUrl}}/api/students/{{studentId}}/promote"
+method: PATCH
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('status 200', () => pm.response.to.have.status(200));
+      pm.test('has level', () => pm.expect(res.data).to.have.property('levelName'));
+    language: text/javascript
+order: 11000

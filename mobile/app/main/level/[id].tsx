@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import {
   View,
@@ -8,6 +8,7 @@ import {
   Pressable,
   I18nManager,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -26,6 +27,8 @@ import {
 import { goBack } from "@/src/utils/navigation";
 import type { StudentListItem, StudentStatus } from "@/src/types/student";
 import { MODE_LABELS, TRACK_LABELS } from "@/src/types/classOffer";
+import { ENROLLMENT_STATUS_LABELS } from "@/src/constants/enrollment";
+import { exportRowsToExcel } from "@/src/utils/exportExcel";
 
 function isMutorLadderOrder(order: number | undefined): boolean {
   return typeof order === "number" && order >= 1 && order <= 8;
@@ -117,6 +120,39 @@ export default function LevelDetailScreen() {
   });
 
   const studentCount = level?.studentCount ?? students.length;
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (exporting) return;
+    if (students.length === 0) {
+      Alert.alert("تنبيه", "لا توجد بيانات للتصدير");
+      return;
+    }
+    setExporting(true);
+    try {
+      const rows = students.map((s) => ({
+        الاسم: s.fullName,
+        "رقم الهوية": s.idNumber,
+        الهاتف: s.phone,
+        المستوى: s.levelName || s.levelShortName,
+        "حالة القيد":
+          ENROLLMENT_STATUS_LABELS[
+            (s.enrollmentStatus ?? "enrolled") as keyof typeof ENROLLMENT_STATUS_LABELS
+          ] ?? s.enrollmentStatus,
+        الحضور: s.attendancePercent ?? "",
+        المعدل: s.gradeAverage ?? "",
+      }));
+      const label = level?.shortName || level?.fullName || "level";
+      await exportRowsToExcel(rows, `level_${label}_${Date.now()}`, "طلاب المستوى");
+    } catch (err) {
+      Alert.alert(
+        "خطأ",
+        err instanceof Error ? err.message : "تعذر تصدير الملف"
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (!levelLoading && level && !isMutorLevel) {
     return (
@@ -291,9 +327,19 @@ export default function LevelDetailScreen() {
         <View style={styles.section}>
           <View style={styles.studentListHeader}>
             <Text style={styles.sectionTitle}>قائمة الطلاب ({studentCount} طالب)</Text>
-            <Pressable style={styles.exportButton}>
-              <MaterialCommunityIcons name="microsoft-excel" size={18} color={centerColors.primaryButtonText} />
-              <Text style={styles.exportButtonText}>تصدير Excel</Text>
+            <Pressable
+              style={[styles.exportButton, exporting && { opacity: 0.6 }]}
+              onPress={handleExportExcel}
+              disabled={exporting || studentsLoading}
+            >
+              {exporting ? (
+                <ActivityIndicator size="small" color={centerColors.primaryButtonText} />
+              ) : (
+                <MaterialCommunityIcons name="microsoft-excel" size={18} color={centerColors.primaryButtonText} />
+              )}
+              <Text style={styles.exportButtonText}>
+                {exporting ? "جاري التصدير…" : "تصدير Excel"}
+              </Text>
             </Pressable>
           </View>
 

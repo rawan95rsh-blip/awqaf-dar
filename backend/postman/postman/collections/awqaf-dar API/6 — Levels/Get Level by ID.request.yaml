@@ -1,0 +1,18 @@
+$kind: http-request
+description: |-
+  أسبوع 4 — تفاصيل مستوى واحد.
+  شغّلي List Levels أولاً لملء `levelId`.
+url: "{{baseUrl}}/api/levels/{{levelId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('level detail', () => {
+        pm.expect(res.data.id).to.eql(pm.environment.get('levelId'));
+        pm.expect(res.data).to.have.property('studentCount');
+        pm.expect(res.data).to.have.property('centerId');
+      });
+    language: text/javascript
+order: 2000

@@ -1,0 +1,15 @@
+$kind: http-request
+description: |-
+  أسبوع 4 — طالبات المستوى.
+  شغّلي List Levels أولاً.
+url: "{{baseUrl}}/api/levels/{{levelId}}/students"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('array response', () => pm.expect(res.data).to.be.an('array'));
+      if (res.data?.[0]?.id) pm.environment.set('studentId', res.data[0].id);
+    language: text/javascript
+order: 3000

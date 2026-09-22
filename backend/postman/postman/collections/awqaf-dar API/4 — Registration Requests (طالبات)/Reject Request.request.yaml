@@ -1,0 +1,23 @@
+$kind: http-request
+description: |-
+  الأسبوع 3 — رفض الطلب مع سبب.
+  ⚠️ لا تشغّلي بعد Approve في نفس التسلسل — استخدمي طلب pending منفصل.
+url: "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}/reject"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "reason": "بيانات غير مكتملة"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('rejected', () => pm.expect(res.data.status).to.eql('rejected'));
+      if (res.data?.id) pm.environment.set('rejectedRegistrationRequestId', res.data.id);
+    language: text/javascript
+order: 14000

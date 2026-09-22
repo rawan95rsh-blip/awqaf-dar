@@ -1,0 +1,10 @@
+$kind: http-request
+url: "{{baseUrl}}/api/account-deletion-requests?status=pending"
+method: GET
+queryParams:
+  status: pending
+scripts:
+  - type: afterResponse
+    code: pm.test('status 200', () => pm.response.to.have.status(200));
+    language: text/javascript
+order: 2000

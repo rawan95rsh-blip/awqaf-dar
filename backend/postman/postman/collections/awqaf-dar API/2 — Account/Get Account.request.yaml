@@ -1,0 +1,14 @@
+$kind: http-request
+description: أسبوع 6 — بيانات الحساب والمركز (يتطلب token).
+url: "{{baseUrl}}/api/account"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('has user', () => pm.expect(res.data.user).to.be.an('object'));
+      pm.test('has center', () => pm.expect(res.data.center).to.be.an('object'));
+    language: text/javascript
+order: 1000

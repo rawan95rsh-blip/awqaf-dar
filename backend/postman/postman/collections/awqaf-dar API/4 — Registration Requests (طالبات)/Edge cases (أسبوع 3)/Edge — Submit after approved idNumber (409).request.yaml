@@ -1,0 +1,34 @@
+$kind: http-request
+description: |-
+  حالة حافة — هوية طالبة موافق عليها مسبقاً → 409.
+  يتطلب تشغيل Submit + Approve للطالبة الافتراضية أولاً.
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "نورة مكررة",
+      "idNumber": "{{studentIdNumber}}",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "0598764999",
+      "password": "{{studentPassword}}",
+      "dob": "2010-05-15",
+      "centerId": "{{centerId}}",
+      "requestedLevelId": "{{levelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 409', () => pm.response.to.have.status(409));
+      const res = pm.response.json();
+      pm.test('already registered', () => pm.expect(res.error).to.include('مسجل'));
+    language: text/javascript
+order: 3000

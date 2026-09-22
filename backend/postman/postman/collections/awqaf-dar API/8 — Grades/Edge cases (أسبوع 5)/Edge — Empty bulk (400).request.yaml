@@ -1,0 +1,22 @@
+$kind: http-request
+description: حالة حافة — bulk فارغ → 400.
+url: "{{baseUrl}}/api/grades/bulk"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}",
+      "subjectIndex": 0,
+      "records": []
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('records required', () => pm.expect(res.error).to.include('درجة'));
+    language: text/javascript
+order: 1000

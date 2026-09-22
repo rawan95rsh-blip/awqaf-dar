@@ -1,0 +1,29 @@
+$kind: http-request
+description: أسبوع 8 — إنشاء حصة.
+url: "{{baseUrl}}/api/sessions"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}",
+      "subjectIndex": 0,
+      "title": "حصة تجريبية — Postman",
+      "startAt": "2030-01-06T10:00:00.000Z",
+      "endAt": "2030-01-06T11:00:00.000Z",
+      "mode": "online",
+      "zoomUrl": "{{zoom_meeting_link_003d}}",
+      "teacherName": "مشرف المركز",
+      "notes": "من Postman"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('has id', () => pm.expect(res.data.id).to.be.a('string'));
+      if (res.data?.id) pm.environment.set('sessionId', res.data.id);
+    language: text/javascript
+order: 3000

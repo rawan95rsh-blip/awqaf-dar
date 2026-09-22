@@ -1,0 +1,70 @@
+name: awqaf-dar — Local
+values:
+  - key: baseUrl
+    value: 'http://localhost:8000'
+  - key: token
+    value: ''
+  - key: userId
+    value: ''
+  - key: centerId
+    value: ''
+  - key: studentId
+    value: ''
+  - key: registrationRequestId
+    value: ''
+  - key: levelId
+    value: ''
+  - key: centerAdminPhone
+    value: 0512345678
+  - key: centerAdminPassword
+    value: '123456'
+  - key: studentIdNumber
+    value: '123456789012'
+  - key: studentPhone
+    value: 0598765497
+  - key: studentPassword
+    value: '123456'
+  - key: studentNationality
+    value: KW
+  - key: studentAcademicLevel
+    value: high
+  - key: newCenterPhone
+    value: '0511111111'
+  - key: newCenterPassword
+    value: '123456'
+  - key: pendingCenterPhone
+    value: '0512222222'
+  - key: otherCenterId
+    value: ''
+  - key: otherCenterLevelId
+    value: ''
+  - key: otherCenterRegistrationRequestId
+    value: ''
+  - key: approvedRegistrationRequestId
+    value: ''
+  - key: edgeDuplicateIdNumber
+    value: 001987654321
+  - key: edgeDuplicatePhone
+    value: 0598764321
+  - key: edgePendingIdNumber
+    value: 001987654322
+  - key: edgePendingPhone
+    value: 0598764322
+  - key: edgeOtherCenterIdNumber
+    value: 001987654323
+  - key: edgeOtherCenterPhone
+    value: 0598764323
+  - key: edgeRejectIdNumber
+    value: 001987654324
+  - key: edgeRejectPhone
+    value: 0598764324
+  - key: edgeWrongLevelIdNumber
+    value: 001987654325
+  - key: edgeWrongLevelPhone
+    value: 0598764325
+  - key: otherCenterStudentId
+    value: ''
+  - key: courseId
+    value: ''
+  - key: studentToken
+    value: ''

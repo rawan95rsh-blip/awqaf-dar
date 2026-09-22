@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/courses/{{courseId}}"
+method: PUT
+headers:
+  Authorization: Bearer {{adminToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "أعمال القلوب (محدث)",
+      "description": "وصف محدث"
+    }
+order: 4000

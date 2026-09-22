@@ -1,0 +1,24 @@
+$kind: http-request
+description: أسبوع 6 — تعديل أوزان الدرجات (المجموع = 100).
+url: "{{baseUrl}}/api/settings/grade-weights"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "attendance": 20,
+      "shortExam": 20,
+      "participation": 20,
+      "final": 40
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));
+    language: text/javascript
+order: 4000

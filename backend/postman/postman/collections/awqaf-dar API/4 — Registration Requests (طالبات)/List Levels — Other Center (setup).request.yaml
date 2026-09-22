@@ -1,0 +1,16 @@
+$kind: http-request
+description: إعداد — مستوى لمركز ثانٍ (لحالات الحافة). شغّلي بعد List Public Centers.
+url: "{{baseUrl}}/api/levels?centerId={{otherCenterId}}"
+method: GET
+queryParams:
+  centerId: "{{otherCenterId}}"
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      if (res.data?.[0]?.id) pm.environment.set('otherCenterLevelId', res.data[0].id);
+    language: text/javascript
+order: 6000

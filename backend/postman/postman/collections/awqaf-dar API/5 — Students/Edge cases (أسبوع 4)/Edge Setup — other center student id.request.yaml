@@ -1,0 +1,15 @@
+$kind: http-request
+description: |-
+  إعداد — شغّلي `npm run seed` وانسخي `otherCenterStudentId` من الـ terminal إلى Environment.
+  ثم شغّلي List Public Centers لملء `otherCenterId`.
+url: "{{baseUrl}}/api/centers/public"
+method: GET
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('otherCenterId set', () => pm.expect(pm.environment.get('otherCenterId')).to.be.a('string').and.not.empty);
+    language: text/javascript
+order: 1000

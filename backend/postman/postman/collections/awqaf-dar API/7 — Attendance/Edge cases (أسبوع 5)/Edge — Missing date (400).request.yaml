@@ -1,0 +1,15 @@
+$kind: http-request
+description: حالة حافة — تاريخ فارغ → 400.
+url: "{{baseUrl}}/api/attendance?levelId={{levelId}}&subjectIndex=0"
+method: GET
+queryParams:
+  levelId: "{{levelId}}"
+  subjectIndex: "0"
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      pm.test('date required', () => pm.expect(res.error).to.include('التاريخ'));
+    language: text/javascript
+order: 1000

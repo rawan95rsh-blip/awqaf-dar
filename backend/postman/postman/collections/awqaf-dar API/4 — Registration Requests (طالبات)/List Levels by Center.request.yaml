@@ -1,0 +1,17 @@
+$kind: http-request
+description: الأسبوع 3 — مستويات الحفظ للمركز (8 مطور + دورات + استماع = 10 لمراكز seed).
+url: "{{baseUrl}}/api/levels?centerId={{centerId}}"
+method: GET
+queryParams:
+  centerId: "{{centerId}}"
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('has levels', () => pm.expect(res.data.length).to.be.at.least(2));
+      if (res.data?.[0]?.id) pm.environment.set('levelId', res.data[0].id);
+    language: text/javascript
+order: 5000

@@ -1,0 +1,27 @@
+$kind: http-request
+description: حالة حافة — تسجيل بنفس الهاتف مرتين → 409.
+url: "{{baseUrl}}/api/auth/register-center"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "dup@example.com",
+      "phone": "{{newCenterPhone}}",
+      "password": "123456",
+      "centerName": "مركز مكرر",
+      "supervisorName": "مشرف",
+      "specializations": ["mutor"]
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 409', () => pm.response.to.have.status(409));
+      const res = pm.response.json();
+      pm.test('error message', () => pm.expect(res.error).to.include('مسجل'));
+    language: text/javascript
+order: 3000

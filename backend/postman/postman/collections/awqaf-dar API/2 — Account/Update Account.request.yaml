@@ -1,0 +1,22 @@
+$kind: http-request
+description: أسبوع 6 — تعديل بيانات المركز والبريد.
+url: "{{baseUrl}}/api/account"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "supervisorName": "اسم المشرف",
+      "email": "center@example.com"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('has center', () => pm.expect(res.data.center).to.be.an('object'));
+    language: text/javascript
+order: 2000

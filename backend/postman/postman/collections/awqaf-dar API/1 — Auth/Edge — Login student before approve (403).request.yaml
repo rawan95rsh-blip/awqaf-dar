@@ -1,0 +1,25 @@
+$kind: http-request
+description: |-
+  حالة حافة — دخول طالبة قبل موافقة المركز.
+  شغّلي أولاً: Edge Setup — Pending for login test (في مجلد 4).
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "idNumber": "{{edgePendingIdNumber}}",
+      "password": "{{studentPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 403', () => pm.response.to.have.status(403));
+      const res = pm.response.json();
+      pm.test('pending message', () => pm.expect(res.error).to.include('بانتظار'));
+    language: text/javascript
+order: 4000

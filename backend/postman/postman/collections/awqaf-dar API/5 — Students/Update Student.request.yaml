@@ -1,0 +1,14 @@
+$kind: http-request
+description: قريباً — تعديل بيانات (idNumber لا يُعدَّل).
+url: "{{baseUrl}}/api/students/{{studentId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "نورة العتيبي",
+      "phone": "0592222222"
+    }
+order: 7000

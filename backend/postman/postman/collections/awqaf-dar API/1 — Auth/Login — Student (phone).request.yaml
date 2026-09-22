@@ -1,0 +1,24 @@
+$kind: http-request
+description: الأسبوع 3 — دخول الطالبة بالهاتف (بعد Approve Request).
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "phone": "{{studentPhone}}",
+      "password": "{{studentPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('role student', () => pm.expect(res.data.user.role).to.eql('student'));
+      if (res.data?.token) pm.environment.set('token', res.data.token);
+    language: text/javascript
+order: 3000

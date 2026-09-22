@@ -1,0 +1,17 @@
+$kind: http-request
+description: يتطلب توكن طالبة نشطة
+url: "{{baseUrl}}/api/account-deletion-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "reason": "أرغب بالانتقال لمركز آخر"
+    }
+scripts:
+  - type: afterResponse
+    code: pm.test('status 201', () => pm.response.to.have.status(201));
+    language: text/javascript
+order: 1000

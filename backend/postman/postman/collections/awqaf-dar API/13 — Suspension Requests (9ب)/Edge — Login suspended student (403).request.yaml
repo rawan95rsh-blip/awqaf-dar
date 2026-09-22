@@ -1,0 +1,20 @@
+$kind: http-request
+description: بعد Approve Suspension على طالبة seed — توقع رسالة وقف القيد
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "idNumber": "{{studentIdNumber}}",
+      "password": "{{studentPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: pm.test('status 403', () => pm.response.to.have.status(403));
+    language: text/javascript
+order: 5000

@@ -25,6 +25,7 @@ import {
   clampGradeValue,
   getGradeLabelInfo,
 } from "@/src/constants/grades";
+import { exportRowsToExcel } from "@/src/utils/exportExcel";
 
 function parseNum(val: string, max: number): number {
   const n = parseInt(val, 10);
@@ -159,6 +160,47 @@ export default function GradesScreen() {
   const gradeInfo = useMemo(() => getGradeLabelInfo(total), [total]);
 
   const isLoading = levelLoading || studentsLoading || gradesLoading;
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (exporting) return;
+    if (students.length === 0) {
+      Alert.alert("تنبيه", "لا توجد بيانات للتصدير");
+      return;
+    }
+    setExporting(true);
+    try {
+      const byId = new Map(
+        (gradesSheet?.records ?? []).map((r) => [r.studentId, r])
+      );
+      const rows = students.map((s) => {
+        const record = byId.get(s.id);
+        return {
+          الاسم: s.fullName,
+          "رقم الهوية": s.idNumber,
+          المادة: subjectName,
+          حضور: record?.breakdown.attendance ?? "",
+          "اختبار قصير": record?.breakdown.shortExam ?? "",
+          مشاركة: record?.breakdown.participation ?? "",
+          نهائي: record?.breakdown.final ?? "",
+          المجموع: record?.total ?? "",
+          التقدير: record?.label ?? "",
+        };
+      });
+      await exportRowsToExcel(
+        rows,
+        `grades_${subjectName}_${Date.now()}`,
+        "الدرجات"
+      );
+    } catch (err) {
+      Alert.alert(
+        "خطأ",
+        err instanceof Error ? err.message : "تعذر تصدير الملف"
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleSave = () => {
     if (!selectedStudent) {
@@ -225,14 +267,19 @@ export default function GradesScreen() {
 
         <View style={styles.header}>
           <Pressable
-            style={styles.exportButton}
-            onPress={() => Alert.alert("تصدير", "جاري تصدير البيانات إلى Excel...")}
+            style={[styles.exportButton, exporting && { opacity: 0.6 }]}
+            onPress={handleExportExcel}
+            disabled={exporting || isLoading}
           >
-            <MaterialCommunityIcons
-              name="microsoft-excel"
-              size={20}
-              color={centerColors.textOnAccent}
-            />
+            {exporting ? (
+              <ActivityIndicator size="small" color={centerColors.textOnAccent} />
+            ) : (
+              <MaterialCommunityIcons
+                name="microsoft-excel"
+                size={20}
+                color={centerColors.textOnAccent}
+              />
+            )}
           </Pressable>
           <Pressable
             style={[styles.saveButton, saveMutation.isPending && styles.saveButtonDisabled]}

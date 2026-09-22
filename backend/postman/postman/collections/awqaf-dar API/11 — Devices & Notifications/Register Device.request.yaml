@@ -1,0 +1,15 @@
+$kind: http-request
+description: تسجيل Expo Push Token. التوكن التجريبي يُقبل في الـ API لكن Expo لن يرسل له فعلياً.
+url: "{{baseUrl}}/api/devices/register"
+method: POST
+headers:
+  Authorization: Bearer {{studentToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "expoPushToken": "ExponentPushToken[test-token-from-postman]",
+      "platform": "ios"
+    }
+order: 1000

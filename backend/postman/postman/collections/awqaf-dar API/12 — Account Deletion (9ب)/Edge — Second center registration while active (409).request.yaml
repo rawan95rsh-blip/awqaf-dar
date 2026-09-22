@@ -1,0 +1,29 @@
+$kind: http-request
+description: هوية seed النشطة تُرفض لمركز آخر
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "محاولة مركز ثانٍ",
+      "idNumber": "{{studentIdNumber}}",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "0599111999",
+      "password": "123456",
+      "dob": "2010-05-15",
+      "centerId": "{{otherCenterId}}",
+      "requestedLevelId": "{{otherCenterLevelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: pm.test('status 409', () => pm.response.to.have.status(409));
+    language: text/javascript
+order: 4000

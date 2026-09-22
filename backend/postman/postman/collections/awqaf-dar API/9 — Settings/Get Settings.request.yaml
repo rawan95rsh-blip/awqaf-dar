@@ -1,0 +1,14 @@
+$kind: http-request
+description: أسبوع 7 — إعدادات المركز (أوزان + عنوان بدون خريطة).
+url: "{{baseUrl}}/api/settings"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('has gradeWeights', () => pm.expect(res.data.gradeWeights).to.be.an('object'));
+      pm.test('has centerProfile', () => pm.expect(res.data.centerProfile).to.be.an('object'));
+      pm.test('centerProfile has addressText', () => pm.expect(res.data.centerProfile).to.have.property('addressText'));
+    language: text/javascript
+order: 1000

@@ -1,0 +1,7 @@
+$kind: http-request
+description: "Inbox: قبول التسجيل + اعتذار المعلمة"
+url: "{{baseUrl}}/api/notifications/me"
+method: GET
+headers:
+  Authorization: Bearer {{studentToken}}
+order: 2000

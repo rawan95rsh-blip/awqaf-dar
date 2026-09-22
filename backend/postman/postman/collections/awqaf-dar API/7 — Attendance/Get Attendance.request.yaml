@@ -1,0 +1,19 @@
+$kind: http-request
+description: |-
+  أسبوع 5 — تحضير يوم لمستوى ومادة.
+  شغّلي Login + List Levels + Level Students أولاً.
+url: "{{baseUrl}}/api/attendance?levelId={{levelId}}&subjectIndex=0&date=2026-07-08"
+method: GET
+queryParams:
+  levelId: "{{levelId}}"
+  subjectIndex: "0"
+  date: 2026-07-08
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('has records', () => pm.expect(res.data.records).to.be.an('array'));
+    language: text/javascript
+order: 2000

@@ -1,0 +1,26 @@
+$kind: http-request
+description: |-
+  أسبوع 4 — قائمة طالبات المركز (مشرف فقط).
+  يملأ `studentId` تلقائياً.
+  شغّلي Login — Center Admin أولاً.
+url: "{{baseUrl}}/api/students?search="
+method: GET
+queryParams:
+  search: ""
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('has students', () => pm.expect(res.data.length).to.be.at.least(1));
+      pm.test('list item shape', () => {
+        const item = res.data[0];
+        pm.expect(item).to.have.property('id');
+        pm.expect(item).to.have.property('fullName');
+        pm.expect(item).to.have.property('levelName');
+        pm.expect(item).to.have.property('status', 'regular');
+      });
+      if (res.data?.[0]?.id) pm.environment.set('studentId', res.data[0].id);
+    language: text/javascript
+order: 2000

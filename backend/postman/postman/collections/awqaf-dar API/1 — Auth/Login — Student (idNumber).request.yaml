@@ -1,0 +1,27 @@
+$kind: http-request
+description: الأسبوع 3 — دخول الطالبة بالهوية الوطنية (بعد Approve Request).
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "idNumber": "{{studentIdNumber}}",
+      "password": "{{studentPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('role student', () => pm.expect(res.data.user.role).to.eql('student'));
+      pm.test('studentProfile present', () => pm.expect(res.data.user.studentProfile).to.be.an('object'));
+      if (res.data?.token) pm.environment.set('token', res.data.token);
+      if (res.data?.user?.studentProfile?.id) pm.environment.set('studentId', res.data.user.studentProfile.id);
+    language: text/javascript
+order: 2000

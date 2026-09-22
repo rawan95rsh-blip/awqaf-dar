@@ -1,0 +1,24 @@
+$kind: http-request
+description: الأسبوع 3 — موافقة المركز → إنشاء Student + User.
+url: "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}/approve"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('student created', () => pm.expect(res.data.studentId).to.be.a('string'));
+      if (res.data?.studentId) {
+        pm.environment.set('studentId', res.data.studentId);
+        pm.environment.set('approvedRegistrationRequestId', pm.environment.get('registrationRequestId'));
+      }
+    language: text/javascript
+order: 13000

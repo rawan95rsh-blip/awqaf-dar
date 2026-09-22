@@ -1,0 +1,22 @@
+$kind: http-request
+description: |-
+  حالة حافة — مشرف مركز تجريبي يوافق على طلب مركز آخر → 404.
+  شغّلي Login Center Admin ثم Edge Setup — Submit to other center.
+url: "{{baseUrl}}/api/registration-requests/{{otherCenterRegistrationRequestId}}/approve"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 404', () => pm.response.to.have.status(404));
+      const res = pm.response.json();
+      pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));
+    language: text/javascript
+order: 6000

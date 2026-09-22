@@ -1,0 +1,12 @@
+$kind: http-request
+description: حالة حافة — ObjectId صالح لكن غير موجود → 404.
+url: "{{baseUrl}}/api/students/507f1f77bcf86cd799439011"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 404', () => pm.response.to.have.status(404));
+      pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));
+    language: text/javascript
+order: 3000

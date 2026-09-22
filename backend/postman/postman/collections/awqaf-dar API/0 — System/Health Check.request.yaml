@@ -1,0 +1,7 @@
+$kind: http-request
+description: ✅ يعمل من اليوم 1
+url: "{{baseUrl}}/api/health"
+method: GET
+auth:
+  type: noauth
+order: 1000

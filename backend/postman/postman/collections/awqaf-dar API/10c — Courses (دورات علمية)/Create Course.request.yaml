@@ -1,0 +1,15 @@
+$kind: http-request
+description: إنشاء دورة بالاسم
+url: "{{baseUrl}}/api/courses"
+method: POST
+headers:
+  Authorization: Bearer {{adminToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "أعمال القلوب",
+      "description": "دورة تجريبية"
+    }
+order: 2000

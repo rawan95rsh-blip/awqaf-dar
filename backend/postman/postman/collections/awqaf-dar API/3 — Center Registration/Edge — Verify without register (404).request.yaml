@@ -1,0 +1,23 @@
+$kind: http-request
+description: حالة حافة — verify بدون register → 404.
+url: "{{baseUrl}}/api/auth/verify-center"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "phone": "0599999999",
+      "code": "7890"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 404', () => pm.response.to.have.status(404));
+      const res = pm.response.json();
+      pm.test('not found', () => pm.expect(res.error).to.include('لم يُعثر'));
+    language: text/javascript
+order: 6000

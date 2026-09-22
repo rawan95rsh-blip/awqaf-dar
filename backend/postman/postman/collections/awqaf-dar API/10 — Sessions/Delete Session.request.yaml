@@ -1,0 +1,12 @@
+$kind: http-request
+description: أسبوع 8 — حذف حصة.
+url: "{{baseUrl}}/api/sessions/{{sessionId}}"
+method: DELETE
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('deleted', () => pm.expect(res.data.message).to.include('تم حذف'));
+    language: text/javascript
+order: 6000

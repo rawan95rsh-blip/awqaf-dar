@@ -342,6 +342,7 @@
 - Postman: مجلد **9 — Settings** (ملف المركز) + **10 — Sessions** (+ 10b/10c) — لا مجلد منفصل باسم Center Profile & Sessions
 - Rate limit على `POST /api/auth/login` (وregister/verify)
 - حسابات: مشرف `0512345678` / `123456` — طالبة `123456789012` / `123456`
+- **مابعد العشر أسابيع** (OTP / نسيان كلمة السر / سهل): انظر **آخر هذا الملف** — ليست ضمن أسبوع 10
 
 ## أسبوع 9ب يوم 5 — مسار مطور ترمات MVP (بند 5)
 
@@ -414,4 +415,69 @@
 | `zoomUrl` | إلزامي إذا `mode=online` عند إنشاء حصة مباشرة و HTTPS فقط |
 | `subjectIndex` | 0–6 |
 | `levelId` | إلزامي لفصل مطور؛ null لفصل دورة |
+
+---
+
+## مابعد العشر أسابيع — التحقق من الهاتف / الإيميل / نسيان كلمة السر / سهل
+
+ليست ضمن أسبوع 10. التنفيذ بعد الإطلاق. الخطة الحية محلية: `.cursor/plans/.plan.md` (لا تُرفع).
+
+**الوضع الحالي:** OTP لتسجيل المركز فقط (نص واضح، بدون SMS؛ تطوير `devCode = 7890`). الإيميل غير موثَّق. لا نسيان كلمة سر. الهوية شكل 12 رقماً فقط.
+
+### مبدأ المنتج
+
+| الحالة | ماذا يحدث |
+|--------|-----------|
+| تسجيل مركز | OTP هاتف **أو** إيميل |
+| تسجيل طالبة | OTP هاتف قبل إرسال الطلب + سهل عند تفعيله |
+| نسيان كلمة السر | هاتف / إيميل / سهل (قناة موثَّقة فقط) |
+| تغيير هاتف أو إيميل | OTP على القناة الجديدة قبل الحفظ |
+
+سهل **اختياري** عند الإطلاق؛ موافقة المشرفة تبقى المصدر النهائي.
+
+### أسبوع 11 يوم 1 — البنية
+
+توسيع `VerificationCode`: أغراض `center_registration` \| `student_registration` \| `email_verify` \| `phone_verify` \| `password_reset` \| `phone_change` \| `email_change`؛ `channel` sms/email؛ `codeHash`؛ TTL 15 د؛ قفل بعد 5 محاولات.
+
+خدمات: `otpService` / `smsProvider` / `emailProvider`. `.env`: `SMS_*` `EMAIL_*` `OTP_PEPPER`. أعلام `phoneVerifiedAt` `emailVerifiedAt` `civilIdVerifiedAt`. Rate limit نحو 5/15د. Postman مجلد **14 — Verification**.
+
+### أسبوع 11 يوم 2 — OTP هاتف/إيميل
+
+```
+POST /api/auth/otp/send
+POST /api/auth/otp/verify
+POST /api/auth/otp/resend
+```
+
+الإبقاء على `verify-center`. شاشة `verify-otp.tsx`. طلب طالبة مشروط بـ OTP ناجح.
+
+### أسبوع 11 يوم 3 — نسيان كلمة السر
+
+```
+POST /api/auth/password/forgot        { phone? | email? | idNumber? }
+POST /api/auth/password/forgot/send
+POST /api/auth/password/reset
+```
+
+لا 404 لكشف الحساب. كلمة رقمية. موقوفة → login 403 بعد إعادة التعيين.
+
+### أسبوع 11 يوم 4 — سهل (محاكٍ)
+
+```
+POST /api/auth/identity/sahel/start
+GET  /api/auth/identity/sahel/status
+POST /api/auth/identity/sahel/callback
+POST /api/auth/identity/sahel/mock-complete
+```
+
+`EXPO_PUBLIC_SAHEL_ENABLED`. mismatch → رفض. بدون flag الزر مخفي.
+
+### أسبوع 11 يوم 5 — E2E
+
+OTP hashed؛ `devCode` في development فقط. بدون PACI → أسبوع 12.
+
+### أسبوع 12 — سهل إنتاج (احتياطي)
+
+بعد اعتماد PACI/الأوقاف فقط. OTP ونسيان كلمة السر يُطلقان من 11 دون انتظار.
+
 

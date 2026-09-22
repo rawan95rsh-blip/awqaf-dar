@@ -1,0 +1,32 @@
+$kind: http-request
+description: حالة حافة — نفس الهوية مرتين (pending) → 409.
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "طالبة تكرار ٢",
+      "idNumber": "{{edgeDuplicateIdNumber}}",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "0598764322",
+      "password": "{{studentPassword}}",
+      "dob": "2010-05-15",
+      "centerId": "{{centerId}}",
+      "requestedLevelId": "{{levelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 409', () => pm.response.to.have.status(409));
+      const res = pm.response.json();
+      pm.test('duplicate pending', () => pm.expect(res.error).to.match(/معلق|مسجل/));
+    language: text/javascript
+order: 2000

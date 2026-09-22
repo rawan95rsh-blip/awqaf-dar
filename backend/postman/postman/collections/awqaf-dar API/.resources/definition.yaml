@@ -1,0 +1,78 @@
+$kind: collection
+name: awqaf-dar API
+description: |-
+  مجموعة طلبات API لمشروع دور القرآن — الأوقاف.
+
+  **الاستيراد:** File → Import → اختر هذا الملف + ملف البيئة `awqaf-dar.local.postman_environment.json`
+
+  **الترتيب:** Health → Login → باقي الطلبات المحمية.
+
+  **أسبوع 7:** عنوان المركز + فلتر نسائي/رجالي في centers/public.
+
+  **أسبوع 8 يوم 1:** مجلد 10 — Sessions (CRUD حصص).
+variables:
+  - key: baseUrl
+    value: http://localhost:8000
+    disabled: false
+    secret: false
+  - key: token
+    value: ""
+    disabled: false
+    secret: false
+  - key: centerAdminPhone
+    value: "0512345678"
+    disabled: false
+    secret: false
+  - key: centerAdminPassword
+    value: "123456"
+    disabled: false
+    secret: false
+  - key: studentIdNumber
+    value: "123456789012"
+    disabled: false
+    secret: false
+  - key: studentPhone
+    value: "0598765497"
+    disabled: false
+    secret: false
+  - key: studentPassword
+    value: "123456"
+    disabled: false
+    secret: false
+  - key: studentId
+    value: ""
+    disabled: false
+    secret: false
+  - key: levelId
+    value: ""
+    disabled: false
+    secret: false
+  - key: centerId
+    value: ""
+    disabled: false
+    secret: false
+  - key: registrationRequestId
+    value: ""
+    disabled: false
+    secret: false
+  - key: userId
+    value: ""
+    disabled: false
+    secret: false
+  - key: sessionId
+    value: ""
+    disabled: false
+    secret: false
+  - key: classOfferId
+    value: ""
+    disabled: false
+    secret: false
+  - key: zoom_meeting_link_003d
+    secret: true
+    disabled: false
+auth:
+  - id: 5a60ef61-522c-434c-8263-ef4d467c3ff9
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{token}}"

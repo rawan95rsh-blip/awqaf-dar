@@ -1,0 +1,5 @@
+$kind: http-request
+description: حذف فصل وحصصه المرتبطة.
+url: "{{baseUrl}}/api/class-offers/{{classOfferId}}"
+method: DELETE
+order: 5000

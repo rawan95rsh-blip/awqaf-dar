@@ -1,0 +1,25 @@
+$kind: http-request
+description: أسبوع 7 — تحديث عنوان المركز (بدون خريطة).
+url: "{{baseUrl}}/api/settings/center-profile"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "addressText": "شارع الملك فهد، حي النسيم، بجوار مسجد الفرقان",
+      "city": "الرياض",
+      "genderAudience": "female"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));
+      pm.test('city saved', () => pm.expect(res.data.city).to.eql('الرياض'));
+      pm.test('genderAudience saved', () => pm.expect(res.data.genderAudience).to.eql('female'));
+    language: text/javascript
+order: 3000

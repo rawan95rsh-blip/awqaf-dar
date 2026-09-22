@@ -1,0 +1,33 @@
+$kind: http-request
+description: |-
+  الأسبوع 3 — طلب تسجيل طالبة.
+  **idNumber ثابت** — لا يتغير بعد الموافقة.
+url: "{{baseUrl}}/api/registration-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "اختبار كلمة المرور",
+      "idNumber": "001999888778",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "phone": "0599111223",
+      "password": "123456",
+      "dob": "2010-05-15",
+      "centerId": "{{centerId}}",
+      "requestedLevelId": "{{levelId}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("status 400", function () {
+        pm.response.to.have.status(400);
+      });
+    language: text/javascript
+order: 10000

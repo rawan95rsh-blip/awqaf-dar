@@ -1,0 +1,39 @@
+$kind: http-request
+description: |-
+  الأسبوع 2 — تسجيل مركز جديد.
+
+  **الاستجابة المتوقعة (201):** message + phone + devCode (7890 في development فقط).
+
+  يحفظ `newCenterPhone` تلقائياً للخطوة التالية.
+url: "{{baseUrl}}/api/auth/register-center"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "center@example.com",
+      "phone": "{{newCenterPhone}}",
+      "password": "{{newCenterPassword}}",
+      "centerName": "مركز تجريبي",
+      "supervisorName": "مشرف المركز",
+      "specializations": ["mutor", "dawa"]
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      if (res.data?.phone) {
+        pm.environment.set('newCenterPhone', res.data.phone);
+        pm.environment.set('pendingCenterPhone', res.data.phone);
+      }
+      if (res.data?.devCode) {
+        console.log('devCode (development):', res.data.devCode);
+      }
+    language: text/javascript
+order: 1000

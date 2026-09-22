@@ -1,0 +1,7 @@
+$kind: http-request
+description: حالة الطالبة في كشف التحضير (مستوى + مادة + تاريخ الحصة)
+url: "{{baseUrl}}/api/sessions/{{sessionId}}/attendance/me"
+method: GET
+headers:
+  Authorization: Bearer {{studentToken}}
+order: 8000

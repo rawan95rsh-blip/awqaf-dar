@@ -1,0 +1,30 @@
+$kind: http-request
+description: إنشاء فصل مطور — يلزم levelId من مستويات ١–٨.
+url: "{{baseUrl}}/api/class-offers"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "track": "mutor",
+      "levelId": "{{levelId}}",
+      "subjectName": "السيرة",
+      "mode": "in_person",
+      "weekday": 0,
+      "startTime": "10:00",
+      "endTime": "11:00",
+      "teacherName": "أ. نورة",
+      "gradeWeights": { "attendance": 20, "shortExam": 20, "participation": 20, "final": 40 }
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('track mutor', () => pm.expect(res.data.track).to.eql('mutor'));
+      if (res.data?.id) pm.environment.set('classOfferId', res.data.id);
+      if (res.data?.nextSessionId) pm.environment.set('sessionId', res.data.nextSessionId);
+    language: text/javascript
+order: 2000

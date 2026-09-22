@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/suspension-requests?status=pending"
+method: GET
+queryParams:
+  status: pending
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('status 200', () => pm.response.to.have.status(200));
+      const res = pm.response.json();
+      if (Array.isArray(res.data) && res.data[0]?.id) pm.environment.set('suspensionRequestId', res.data[0].id);
+    language: text/javascript
+order: 2000

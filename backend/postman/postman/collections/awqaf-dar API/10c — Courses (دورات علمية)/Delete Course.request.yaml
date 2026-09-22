@@ -1,0 +1,7 @@
+$kind: http-request
+description: حذف دورة وما يرتبط بها من عروض/حصص
+url: "{{baseUrl}}/api/courses/{{courseId}}"
+method: DELETE
+headers:
+  Authorization: Bearer {{adminToken}}
+order: 5000

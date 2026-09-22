@@ -33,24 +33,24 @@
 
 5. Apply / Create → انتظري حتى تصبح الخدمة **Live**.
 
-6. انسخي الرابط العام، مثال:
-   `https://awqaf-dar-api.onrender.com`  
+6. الرابط المنشور (Live):
+   `https://awqaf-dar.onrender.com`  
    (بدون شرطة `/` في النهاية)
 
-7. افتحي في المتصفح:  
-   `https://YOUR-SERVICE.onrender.com/api/health`  
-   لازم يظهر: `{"success":true,"data":{"status":"ok"}}`
+7. التحقق في المتصفح:  
+   `https://awqaf-dar.onrender.com/api/health`  
+   → `{"success":true,"data":{"status":"ok"}}` ✅
 
-8. في **MongoDB Atlas** → Network Access → أضيفي `0.0.0.0/0`  
-   (كي يسمح لاتصال Render؛ أو قيّدي لاحقاً بـ IPs إن لزم).
+8. في **MongoDB Atlas** → Network Access → `0.0.0.0/0`  
+   (كي يسمح لاتصال Render).
 
-9. حدّثي الموبايل — في `mobile/eas.json` للـ `preview` و `production`:
+9. الموبايل — في `mobile/eas.json` للـ `preview` و `production`:
 
 ```json
-"EXPO_PUBLIC_API_URL": "https://YOUR-SERVICE.onrender.com"
+"EXPO_PUBLIC_API_URL": "https://awqaf-dar.onrender.com"
 ```
 
-ثم أرسلي الرابط في المحادثة لنضبطه في المشروع تلقائياً.
+(مضبوط في المستودع.)
 
 ---
 

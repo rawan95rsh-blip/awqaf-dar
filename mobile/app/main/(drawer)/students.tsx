@@ -19,6 +19,8 @@ import { centerColors, spacing } from "@/constants";
 import DrawerTrigger from "@/src/components/DrawerTrigger";
 import { fetchStudents, studentQueryKeys } from "@/src/api/students";
 import type { StudentStatus } from "@/src/types/student";
+import { ENROLLMENT_STATUS_LABELS } from "@/src/constants/enrollment";
+import { exportRowsToExcel } from "@/src/utils/exportExcel";
 
 const STATUS_CONFIG = {
   regular: { label: "منتظمة", bg: centerColors.accentGreen, text: centerColors.textOnAccent },
@@ -75,6 +77,40 @@ export default function StudentsScreen() {
     queryKey: studentQueryKeys.list({ search: debouncedSearch }),
     queryFn: () => fetchStudents({ search: debouncedSearch }),
   });
+
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (exporting) return;
+    if (students.length === 0) {
+      Alert.alert("تنبيه", "لا توجد بيانات للتصدير");
+      return;
+    }
+    setExporting(true);
+    try {
+      const rows = students.map((s) => ({
+        الاسم: s.fullName,
+        "رقم الهوية": s.idNumber,
+        الهاتف: s.phone,
+        المستوى: s.levelName || s.levelShortName,
+        المسار: s.track === "courses" ? "دورات" : "مطور",
+        "حالة القيد":
+          ENROLLMENT_STATUS_LABELS[
+            (s.enrollmentStatus ?? "enrolled") as keyof typeof ENROLLMENT_STATUS_LABELS
+          ] ?? s.enrollmentStatus,
+        الحضور: s.attendancePercent ?? "",
+        المعدل: s.gradeAverage ?? "",
+      }));
+      await exportRowsToExcel(rows, `students_${Date.now()}`, "الطلاب");
+    } catch (err) {
+      Alert.alert(
+        "خطأ",
+        err instanceof Error ? err.message : "تعذر تصدير الملف"
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleFilterPress = (filterId: string) => {
     if (filterId !== "all") {
@@ -171,13 +207,23 @@ export default function StudentsScreen() {
           })}
         </ScrollView>
 
-        <Pressable style={styles.exportButton}>
-          <MaterialCommunityIcons
-            name="microsoft-excel"
-            size={20}
-            color={centerColors.primaryButtonText}
-          />
-          <Text style={styles.exportButtonText}>تصدير Excel</Text>
+        <Pressable
+          style={[styles.exportButton, exporting && { opacity: 0.6 }]}
+          onPress={handleExportExcel}
+          disabled={exporting || isLoading}
+        >
+          {exporting ? (
+            <ActivityIndicator size="small" color={centerColors.primaryButtonText} />
+          ) : (
+            <MaterialCommunityIcons
+              name="microsoft-excel"
+              size={20}
+              color={centerColors.primaryButtonText}
+            />
+          )}
+          <Text style={styles.exportButtonText}>
+            {exporting ? "جاري التصدير…" : "تصدير Excel"}
+          </Text>
         </Pressable>
 
         {isLoading ? (

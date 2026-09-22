@@ -1,0 +1,12 @@
+$kind: http-request
+description: الأسبوع 3 — تفاصيل طلب واحد.
+url: "{{baseUrl}}/api/registration-requests/{{registrationRequestId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('has id', () => pm.expect(res.data.id).to.eql(pm.environment.get('registrationRequestId')));
+    language: text/javascript
+order: 12000

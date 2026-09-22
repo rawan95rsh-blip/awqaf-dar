@@ -1,0 +1,31 @@
+$kind: http-request
+description: |-
+  أسبوع 6 — إضافة مستوى جديد.
+  شغّلي Login — Center Admin أولاً.
+  `order` يجب ألا يتكرر لنفس المركز.
+url: "{{baseUrl}}/api/levels"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "المستوى التاسع مطور",
+      "shortName": "مستوى مطور ٩",
+      "order": 11
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 201', () => pm.response.to.have.status(201));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('level created', () => {
+        pm.expect(res.data).to.have.property('id');
+        pm.expect(res.data.fullName).to.eql('المستوى التاسع مطور');
+        pm.expect(res.data.order).to.eql(11);
+      });
+      if (res.data?.id) pm.environment.set('levelId', res.data.id);
+    language: text/javascript
+order: 4000

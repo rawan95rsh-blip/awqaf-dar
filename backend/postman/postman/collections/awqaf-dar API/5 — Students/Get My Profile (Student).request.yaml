@@ -1,0 +1,23 @@
+$kind: http-request
+description: |-
+  أسبوع 6 — ملف الطالبة الحالية.
+  شغّلي Login — Student (idNumber) أولاً.
+url: "{{baseUrl}}/api/students/me"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('student profile', () => {
+        pm.expect(res.data).to.have.property('id');
+        pm.expect(res.data).to.have.property('fullName');
+        pm.expect(res.data).to.have.property('levelName');
+        pm.expect(res.data).to.have.property('centerName');
+        pm.expect(res.data.center).to.be.an('object');
+        pm.expect(res.data.attendanceCalendar).to.be.an('array');
+      });
+      if (res.data?.id) pm.environment.set('studentId', res.data.id);
+    language: text/javascript
+order: 5000

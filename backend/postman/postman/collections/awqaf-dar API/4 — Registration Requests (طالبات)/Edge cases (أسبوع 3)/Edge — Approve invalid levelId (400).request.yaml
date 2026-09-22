@@ -1,0 +1,22 @@
+$kind: http-request
+description: |-
+  حالة حافة — levelId من مركز آخر → 400.
+  شغّلي Login + List Levels — Other Center + Edge Setup — Pending for wrong level test.
+url: "{{baseUrl}}/api/registration-requests/{{edgeWrongLevelRequestId}}/approve"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{otherCenterLevelId}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('Status 400', () => pm.response.to.have.status(400));
+      const res = pm.response.json();
+      pm.test('invalid level', () => pm.expect(res.error).to.match(/مستوى|صالح/));
+    language: text/javascript
+order: 11000

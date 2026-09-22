@@ -1,0 +1,35 @@
+$kind: http-request
+description: |-
+  أسبوع 5 — حفظ درجات جماعي.
+  استخدمي Level Students لملء `studentId` من نفس المستوى.
+url: "{{baseUrl}}/api/grades/bulk"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "levelId": "{{levelId}}",
+      "subjectIndex": 0,
+      "records": [
+        {
+          "studentId": "{{studentId}}",
+          "breakdown": {
+            "attendance": 20,
+            "shortExam": 18,
+            "participation": 15,
+            "final": 40
+          }
+        }
+      ]
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('saved message', () => pm.expect(res.data.message).to.include('تم حفظ'));
+    language: text/javascript
+order: 3000

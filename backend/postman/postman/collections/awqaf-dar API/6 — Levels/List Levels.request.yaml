@@ -1,0 +1,18 @@
+$kind: http-request
+description: |-
+  أسبوع 4 — مستويات المركز مع `studentCount`.
+  تأكدي أن `centerId` مضبوط (Login — Center Admin).
+url: "{{baseUrl}}/api/levels?centerId={{centerId}}"
+method: GET
+queryParams:
+  centerId: "{{centerId}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('has levels', () => pm.expect(res.data.length).to.be.at.least(1));
+      pm.test('has studentCount', () => pm.expect(res.data[0]).to.have.property('studentCount'));
+      if (res.data?.[0]?.id) pm.environment.set('levelId', res.data[0].id);
+    language: text/javascript
+order: 1000

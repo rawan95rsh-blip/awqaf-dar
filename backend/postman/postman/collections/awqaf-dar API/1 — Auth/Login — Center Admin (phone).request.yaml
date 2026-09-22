@@ -1,0 +1,34 @@
+$kind: http-request
+description: |-
+  دخول مشرف المركز بالهاتف.
+  يعمل مع حساب seed أو بعد Register → Verify.
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "phone": "{{centerAdminPhone}}",
+      "password": "{{centerAdminPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      if (res.data?.token) {
+        pm.environment.set('token', res.data.token);
+      }
+      if (res.data?.user?.id) {
+        pm.environment.set('userId', res.data.user.id);
+      }
+      if (res.data?.user?.centerProfile?.id) {
+        pm.environment.set('centerId', res.data.user.centerProfile.id);
+      }
+    language: text/javascript
+order: 1000

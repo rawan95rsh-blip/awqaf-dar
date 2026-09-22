@@ -1,0 +1,14 @@
+$kind: http-request
+description: "تسجيل ذاتي في كشف التحضير — status: present"
+url: "{{baseUrl}}/api/sessions/{{sessionId}}/check-in"
+method: POST
+headers:
+  Authorization: Bearer {{studentToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "status": "present"
+    }
+order: 9000

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ScreenContainer from "@/src/components/ScreenContainer";
 import Input from "@/src/components/Input";
 import Button from "@/src/components/Button";
@@ -77,10 +78,29 @@ export default function LoginScreen() {
     router.push("/(auth)/register-center" as Href);
   };
 
+  const handlePressBack = () => {
+    router.replace("/(auth)/welcome" as Href);
+  };
+
   return (
     <ScreenContainer>
       <View style={styles.container}>
-        <Text style={styles.title}>تسجيل الدخول</Text>
+        <View style={styles.header}>
+          <Pressable
+            onPress={handlePressBack}
+            style={styles.backButton}
+            accessibilityLabel="العودة للصفحة الرئيسية"
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons
+              name="arrow-right"
+              size={24}
+              color={colors.text}
+            />
+          </Pressable>
+          <Text style={styles.title}>تسجيل الدخول</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
         <Input
           value={identifier}
@@ -145,11 +165,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: spacing.xxl,
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.xl,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerSpacer: {
+    width: 40,
+  },
   title: {
+    flex: 1,
     fontSize: 24,
     fontWeight: "700",
     color: colors.text,
-    marginBottom: spacing.xl,
     textAlign: "center",
   },
   errorBlock: {

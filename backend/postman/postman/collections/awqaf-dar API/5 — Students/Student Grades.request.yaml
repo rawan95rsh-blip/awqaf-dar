@@ -1,0 +1,15 @@
+$kind: http-request
+description: |-
+  أسبوع 5 — درجات الطالبة عبر كل المواد.
+  شغّلي Login + List Students أو Level Students أولاً.
+url: "{{baseUrl}}/api/students/{{studentId}}/grades"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      const res = pm.response.json();
+      pm.test('Status 200', () => pm.response.to.have.status(200));
+      pm.test('success true', () => pm.expect(res.success).to.eql(true));
+      pm.test('has grades array', () => pm.expect(res.data.grades).to.be.an('array'));
+    language: text/javascript
+order: 8000

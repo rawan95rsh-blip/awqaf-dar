@@ -1,0 +1,14 @@
+$kind: http-request
+description: "اعتذار المعلمة: status=cancelled + cancelReason. الإشعار Push يوم 3."
+url: "{{baseUrl}}/api/sessions/{{sessionId}}/cancel"
+method: POST
+headers:
+  Authorization: Bearer {{adminToken}}
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "reason": "ظرف طارئ للمعلمة — تُعاد جدولة الحصة لاحقاً"
+    }
+order: 10000

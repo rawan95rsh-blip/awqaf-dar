@@ -1,0 +1,28 @@
+$kind: http-request
+description: أسبوع 9ب يوم 2 — إضافة طالبة يدوياً؛ المستوى التمهيدي افتراضي إن لم يُمرَّر levelId.
+url: "{{baseUrl}}/api/students"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "fullName": "طالبة يدوية تمهيدي",
+      "idNumber": "001999000111",
+      "gender": "female",
+      "nationality": "{{studentNationality}}",
+      "academicLevel": "{{studentAcademicLevel}}",
+      "track": "mutor",
+      "phone": "0599000111",
+      "password": "123456",
+      "dob": "2010-01-01"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('status 201', () => pm.response.to.have.status(201));
+      const res = pm.response.json();
+      if (res.data?.id) pm.environment.set('manualStudentId', res.data.id);
+    language: text/javascript
+order: 6000

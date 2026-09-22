@@ -19,10 +19,9 @@
 
 ## قبل البناء
 
-1. انشري الباك اند على HTTPS ([`DEPLOY.md`](./DEPLOY.md))
-2. استبدلي في `eas.json`:
-   `https://REPLACE_WITH_PRODUCTION_API` → رابطك الحقيقي
-3. حساب Apple Developer فعّال
+1. انشري الباك اند على HTTPS ([`DEPLOY.md`](./DEPLOY.md)) — الحالي: `https://awqaf-dar.onrender.com`
+2. تأكدي `EXPO_PUBLIC_API_URL` في `eas.json` (preview/production)
+3. حساب Apple Developer **Program** ($99) — عند البناء/النشر فقط (المجاني يكفي للتطوير)
 
 ```bash
 cd mobile
@@ -49,8 +48,15 @@ eas submit --platform ios --latest
 **التصنيف:** Education  
 **العمر:** 4+
 
-**Privacy Policy URL:** *(مطلوب — انشري صفحة عامة ثم الصقي الرابط)*  
-**Support URL:** *(صفحة أو بريد دعم)*
+**Privacy Policy URL:** انشري [`legal/privacy.html`](./legal/privacy.html) على استضافة عامة (GitHub Pages / أي موقع) ثم الصقي الرابط هنا.  
+النص الكامل: [`legal/PRIVACY_POLICY_AR.md`](./legal/PRIVACY_POLICY_AR.md)
+
+**Support URL:** انشري [`legal/support.html`](./legal/support.html) أو استخدمي بريداً عاماً للدعم.  
+النص: [`legal/SUPPORT_AR.md`](./legal/SUPPORT_AR.md)
+
+**قبل النشر:** املئي خانات البريد واسم الجهة في ملفي الخصوصية والدعم (placeholders).
+
+**ملاحظة توقيت:** حساب Apple المجاني يكفي الآن؛ ادفعِ Program ($99) وارفعِ الروابط في App Store Connect عند الاقتراب من Submit وبعد الموافقات اللازمة.
 
 ## حسابات للمراجع (App Review Information)
 
