@@ -1,18 +1,14 @@
-export type ClassTrack = "mutor" | "courses";
+import type { ClassTrack } from "@/src/constants/domain";
+
+export type { ClassTrack };
 export type ClassMode = "in_person" | "online";
-
-export const MUTOR_LEVEL_ORDER_MIN = 1;
-export const MUTOR_LEVEL_ORDER_MAX = 8;
-
-export const TRACK_LABELS: Record<ClassTrack, string> = {
-  mutor: "مطور",
-  courses: "دورة",
-};
 
 export const MODE_LABELS: Record<ClassMode, string> = {
   in_person: "حضوري",
   online: "أونلاين",
 };
+
+export { CLASS_TRACK_LABELS as TRACK_LABELS } from "@/src/constants/domain";
 
 export interface ClassOfferItem {
   id: string;
@@ -44,6 +40,8 @@ export interface CreateClassOfferPayload {
   track: ClassTrack;
   levelId?: string | null;
   subjectName: string;
+  /** رقم المادة (0–6) — يُرسل صراحةً حتى لا يعتمد الخادم على تهجئة الاسم */
+  subjectIndex?: number;
   mode: ClassMode;
   weekday: number;
   startTime: string;

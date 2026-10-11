@@ -11,6 +11,7 @@ import {
 import { sendError, sendSuccess } from '../utils/response';
 import { getStudentStats } from '../utils/studentStats';
 import { canAccessStudentRecord } from '../utils/studentAccess';
+import { centerDateKey } from '../utils/timezone';
 
 function parseDateParam(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -30,10 +31,9 @@ function parseDateParam(value: string): Date | null {
   return parsed;
 }
 
+/** «اليوم» بتوقيت المركز — حتى لا يُرفض تحضير اليوم بين 12 و3 فجراً */
 function isFutureDate(date: Date): boolean {
-  const now = new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  return date.getTime() > today.getTime();
+  return formatDate(date) > centerDateKey(new Date());
 }
 
 function formatDate(date: Date): string {

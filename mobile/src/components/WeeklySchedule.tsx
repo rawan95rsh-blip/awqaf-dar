@@ -1,396 +1,235 @@
 import { useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ActivityIndicator,
-  ScrollView,
-} from "react-native";
-import { useRouter } from "expo-router";
+import { Pressable, StyleSheet, View } from "react-native";
+import { useRouter, type Href } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
-import { centerColors, spacing } from "@/constants";
+import { colors, radius, space } from "@/src/theme";
+import { Badge, Button, Card, EmptyState, ErrorState, IconButton, Skeleton, Text, useToast } from "@/src/ui";
 import { listSessions, sessionsQueryKeys } from "@/src/api/sessions";
-import {
-  SESSION_MODE_LABELS,
-  type SessionItem,
-} from "@/src/types/session";
+import { classOffersQueryKeys, listClassOffers } from "@/src/api/classOffers";
+import { SESSION_MODE_LABELS, type SessionItem } from "@/src/types/session";
+import { SUBJECT_ICONS, WEEKDAYS, WEEKDAYS_SHORT } from "@/src/constants/domain";
+import { addDays, formatDateShort, formatTime, startOfWeek, toDateKey } from "@/src/utils/format";
+import { exportWorkbook, weeklyScheduleSheets } from "@/src/utils/excel";
+import { useAuth } from "@/src/context/AuthContext";
 
-const WEEKDAY_LABELS = [
-  "الأحد",
-  "الإثنين",
-  "الثلاثاء",
-  "الأربعاء",
-  "الخميس",
-  "الجمعة",
-  "السبت",
-];
+const SUBJECT_TINTS = ["#E8F1EC", "#F4ECDD", "#E7EEF6", "#F3E8EE", "#ECEAF6", "#E9F2F2", "#F5EDE3"];
 
-const TIME_COL_WIDTH = 56;
-const DAY_COL_WIDTH = 96;
-const PILL_COLORS = [
-  { bg: "#e8f5fd", text: "#1d9bf0" },
-  { bg: "#dcfce7", text: "#166534" },
-  { bg: "#fce7f3", text: "#9d174d" },
-  { bg: "#e0e7ff", text: "#3730a3" },
-  { bg: "#fef3c7", text: "#92400e" },
-  { bg: "#fee2e2", text: "#b91c1c" },
-  { bg: "#f3e8ff", text: "#7e22ce" },
-];
-
-function startOfWeek(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
-  return d;
-}
-
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
-function toIsoDay(date: Date): string {
-  return date.toISOString();
-}
-
-function formatHHMM(iso: string): string {
-  const d = new Date(iso);
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${h}:${m}`;
-}
-
-function formatWeekLabel(start: Date): string {
-  const end = addDays(start, 6);
-  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
-  return `${start.toLocaleDateString("ar-SA", opts)} – ${end.toLocaleDateString("ar-SA", opts)}`;
-}
-
-function shortTitle(title: string): string {
-  const trimmed = title.trim();
-  if (trimmed.length <= 18) return trimmed;
-  return `${trimmed.slice(0, 16)}…`;
-}
-
-/** جدول أسبوعي شبكة: أيام × أوقات */
-export default function WeeklySchedule() {
+/**
+ * الجدول الأسبوعي — أسبوع × يوم، بقائمة حصص لليوم المختار (أوضح من شبكة صغيرة على الجوال).
+ * يعتمد على الفصول المتكررة؛ الخادم يولّد حصص كل أسبوع تلقائياً.
+ */
+export default function WeeklySchedule({
+  levelId,
+  title = "الجدول الأسبوعي",
+  scopeLabel,
+}: {
+  levelId?: string;
+  title?: string;
+  scopeLabel?: string;
+}) {
   const router = useRouter();
+  const toast = useToast();
+  const { user } = useAuth();
   const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedDay, setSelectedDay] = useState(() => new Date().getDay());
+  const [exporting, setExporting] = useState(false);
 
-  const weekStart = useMemo(() => {
-    const base = startOfWeek(new Date());
-    return addDays(base, weekOffset * 7);
-  }, [weekOffset]);
-
-  const weekEnd = useMemo(() => {
-    const end = addDays(weekStart, 7);
-    end.setMilliseconds(-1);
-    return end;
-  }, [weekStart]);
+  const weekStart = useMemo(() => addDays(startOfWeek(new Date()), weekOffset * 7), [weekOffset]);
+  const range = useMemo(
+    () => ({ from: weekStart.toISOString(), to: addDays(weekStart, 7).toISOString(), levelId }),
+    [weekStart, levelId]
+  );
 
   const sessionsQuery = useQuery({
-    queryKey: sessionsQueryKeys.list({
-      from: toIsoDay(weekStart),
-      to: toIsoDay(weekEnd),
-    }),
-    queryFn: () =>
-      listSessions({
-        from: toIsoDay(weekStart),
-        to: toIsoDay(weekEnd),
-      }),
+    queryKey: sessionsQueryKeys.list(range),
+    queryFn: () => listSessions(range),
   });
 
-  const sessions = sessionsQuery.data ?? [];
+  const offersQuery = useQuery({
+    queryKey: classOffersQueryKeys.list(levelId ? { levelId } : {}),
+    queryFn: () => listClassOffers(levelId ? { levelId } : undefined),
+  });
 
-  const timeSlots = useMemo(() => {
-    const set = new Set<string>();
-    for (const session of sessions) {
-      set.add(formatHHMM(session.startAt));
-    }
-    return Array.from(set).sort();
-  }, [sessions]);
-
-  const cellMap = useMemo(() => {
-    const map = new Map<string, SessionItem[]>();
-    for (const session of sessions) {
+  const byDay = useMemo(() => {
+    const map = new Map<number, SessionItem[]>();
+    for (const session of sessionsQuery.data ?? []) {
       const day = new Date(session.startAt).getDay();
-      const time = formatHHMM(session.startAt);
-      const key = `${day}|${time}`;
-      const list = map.get(key) ?? [];
-      list.push(session);
-      map.set(key, list);
+      map.set(day, [...(map.get(day) ?? []), session]);
     }
+    for (const list of map.values()) list.sort((a, b) => a.startAt.localeCompare(b.startAt));
     return map;
-  }, [sessions]);
+  }, [sessionsQuery.data]);
 
-  const displaySlots = timeSlots.length > 0 ? timeSlots : ["—"];
+  const todayKey = toDateKey(new Date());
+  const daySessions = byDay.get(selectedDay) ?? [];
+
+  const handleExport = async () => {
+    const offers = offersQuery.data ?? [];
+    if (!offers.length) {
+      toast.error("لا توجد فصول لتصديرها");
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportWorkbook(
+        weeklyScheduleSheets(offers, user?.centerProfile?.nameAr ?? "المركز", scopeLabel ?? "جميع المستويات"),
+        `الجدول_الأسبوعي_${scopeLabel ?? "المركز"}`
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "تعذر التصدير");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.title}>الجدول الأسبوعي</Text>
-      <Text style={styles.subtitle}>حصص المركز لهذا الأسبوع</Text>
-
-      <View style={styles.weekNav}>
-        <Pressable
-          style={styles.weekNavBtn}
-          onPress={() => setWeekOffset((v) => v - 1)}
-          accessibilityLabel="الأسبوع السابق"
-        >
-          <MaterialCommunityIcons
-            name="chevron-right"
-            size={22}
-            color={centerColors.text}
-          />
-        </Pressable>
-        <Text style={styles.weekLabel}>{formatWeekLabel(weekStart)}</Text>
-        <Pressable
-          style={styles.weekNavBtn}
-          onPress={() => setWeekOffset((v) => v + 1)}
-          accessibilityLabel="الأسبوع التالي"
-        >
-          <MaterialCommunityIcons
-            name="chevron-left"
-            size={22}
-            color={centerColors.text}
-          />
-        </Pressable>
+    <Card padding={4} style={styles.card}>
+      <View style={styles.headerRow}>
+        <View style={styles.flex}>
+          <Text variant="headline">{title}</Text>
+          <Text variant="caption" color="textSecondary">
+            {`${formatDateShort(weekStart)} – ${formatDateShort(addDays(weekStart, 6))}`}
+          </Text>
+        </View>
+        <IconButton icon="chevron-right" accessibilityLabel="الأسبوع السابق" variant="surface" size={20} onPress={() => setWeekOffset((v) => v - 1)} />
+        <IconButton icon="chevron-left" accessibilityLabel="الأسبوع التالي" variant="surface" size={20} onPress={() => setWeekOffset((v) => v + 1)} />
       </View>
 
-      <Pressable style={styles.resetWeek} onPress={() => setWeekOffset(0)}>
-        <Text style={styles.resetWeekText}>هذا الأسبوع</Text>
-      </Pressable>
+      <View style={styles.days}>
+        {WEEKDAYS.map((label, day) => {
+          const date = addDays(weekStart, day);
+          const isSelected = selectedDay === day;
+          const isToday = toDateKey(date) === todayKey;
+          const count = byDay.get(day)?.length ?? 0;
+          return (
+            <Pressable
+              key={label}
+              onPress={() => setSelectedDay(day)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isSelected }}
+              accessibilityLabel={`${label} ${formatDateShort(date)} — ${count} حصص`}
+              style={[styles.day, isSelected && styles.daySelected]}
+            >
+              <Text variant="micro" color={isSelected ? "onPrimary" : "textSecondary"} numberOfLines={1} adjustsFontSizeToFit>
+                {WEEKDAYS_SHORT[day]}
+              </Text>
+              <Text variant="bodyStrong" color={isSelected ? "onPrimary" : isToday ? "primary" : "text"} tabular>
+                {String(date.getDate())}
+              </Text>
+              <View style={[styles.dot, count > 0 && (isSelected ? styles.dotOnSelected : styles.dotOn)]} />
+            </Pressable>
+          );
+        })}
+      </View>
 
       {sessionsQuery.isLoading ? (
-        <ActivityIndicator size="large" color={centerColors.accent} />
+        <View style={styles.list}>
+          <Skeleton height={64} radiusSize={radius.md} />
+          <Skeleton height={64} radiusSize={radius.md} />
+        </View>
       ) : sessionsQuery.isError ? (
-        <Text style={styles.errorText}>
-          {sessionsQuery.error instanceof Error
-            ? sessionsQuery.error.message
-            : "تعذر تحميل الجدول"}
-        </Text>
+        <ErrorState compact message={(sessionsQuery.error as Error).message} onRetry={() => sessionsQuery.refetch()} />
+      ) : daySessions.length === 0 ? (
+        <EmptyState
+          compact
+          icon="calendar-blank-outline"
+          title={`لا حصص يوم ${WEEKDAYS[selectedDay]}`}
+          description={(offersQuery.data?.length ?? 0) === 0 ? "أضيفي فصلاً ليظهر في الجدول كل أسبوع" : undefined}
+          actionLabel={(offersQuery.data?.length ?? 0) === 0 ? "إضافة فصل" : undefined}
+          onAction={() => router.push((levelId ? `/main/add-class?levelId=${levelId}` : "/main/add-class") as Href)}
+        />
       ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator
-          style={styles.tableScroll}
-          contentContainerStyle={styles.tableScrollContent}
-        >
-          <View style={styles.table}>
-            <View style={styles.tableRow}>
-              <View style={[styles.cell, styles.timeHeaderCell]}>
-                <Text style={styles.headerText}>الوقت</Text>
-              </View>
-              {WEEKDAY_LABELS.map((label) => (
-                <View key={label} style={[styles.cell, styles.dayHeaderCell]}>
-                  <Text style={styles.headerText} numberOfLines={1}>
-                    {label}
+        <View style={styles.list}>
+          {daySessions.map((session) => {
+            const cancelled = session.status === "cancelled";
+            return (
+              <Pressable
+                key={session.id}
+                onPress={() => router.push(`/main/session/${session.id}` as Href)}
+                accessibilityRole="button"
+                accessibilityLabel={`${session.title} ${formatTime(session.startAt)}`}
+                style={({ pressed }) => [
+                  styles.session,
+                  { backgroundColor: SUBJECT_TINTS[session.subjectIndex % SUBJECT_TINTS.length] },
+                  cancelled && styles.sessionCancelled,
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <View style={styles.time}>
+                  <Text variant="bodyStrong" tabular>
+                    {formatTime(session.startAt)}
+                  </Text>
+                  <Text variant="micro" color="textSecondary" tabular>
+                    {formatTime(session.endAt)}
                   </Text>
                 </View>
-              ))}
-            </View>
-
-            {displaySlots.map((time) => (
-              <View key={time} style={styles.tableRow}>
-                <View style={[styles.cell, styles.timeCell]}>
-                  <Text style={styles.timeText}>{time === "—" ? "—" : time}</Text>
+                <View style={styles.timeRule} />
+                <MaterialCommunityIcons
+                  name={SUBJECT_ICONS[session.subjectIndex] ?? "book-outline"}
+                  size={20}
+                  color={colors.primary}
+                />
+                <View style={styles.flex}>
+                  <Text
+                    variant="bodyStrong"
+                    numberOfLines={1}
+                    style={cancelled ? styles.strike : undefined}
+                  >
+                    {session.title}
+                  </Text>
+                  <Text variant="caption" color="textSecondary" numberOfLines={1}>
+                    {[session.teacherName, SESSION_MODE_LABELS[session.mode]].filter(Boolean).join(" · ")}
+                  </Text>
                 </View>
-                {WEEKDAY_LABELS.map((_, day) => {
-                  if (time === "—") {
-                    return (
-                      <View key={`${day}-empty`} style={[styles.cell, styles.dayCell]}>
-                        <Text style={styles.emptyCell}>—</Text>
-                      </View>
-                    );
-                  }
-                  const items = cellMap.get(`${day}|${time}`) ?? [];
-                  const first = items[0];
-                  const extra = items.length - 1;
-                  const colors = first
-                    ? PILL_COLORS[first.subjectIndex % PILL_COLORS.length]
-                    : null;
-
-                  return (
-                    <Pressable
-                      key={`${day}|${time}`}
-                      style={[styles.cell, styles.dayCell]}
-                      disabled={!first}
-                      onPress={() => {
-                        if (!first) return;
-                        router.push(
-                          `/main/session/${first.id}` as import("expo-router").Href
-                        );
-                      }}
-                    >
-                      {first && colors ? (
-                        <View style={[styles.pill, { backgroundColor: colors.bg }]}>
-                          <Text
-                            style={[styles.pillTitle, { color: colors.text }]}
-                            numberOfLines={2}
-                          >
-                            {shortTitle(first.title)}
-                          </Text>
-                          <Text style={[styles.pillMeta, { color: colors.text }]}>
-                            {SESSION_MODE_LABELS[first.mode]}
-                            {extra > 0 ? ` · +${extra}` : ""}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.emptyCell}>—</Text>
-                      )}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-        </ScrollView>
+                {cancelled ? <Badge label="ملغاة" tone="danger" size="sm" /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
       )}
 
-      {!sessionsQuery.isLoading &&
-      !sessionsQuery.isError &&
-      sessions.length === 0 ? (
-        <Text style={styles.emptyWeekHint}>لا توجد حصص مجدولة في هذا الأسبوع</Text>
-      ) : null}
-    </View>
+      <Button
+        variant="secondary"
+        size="sm"
+        icon="microsoft-excel"
+        loading={exporting}
+        onPress={handleExport}
+        style={styles.export}
+      >
+        تصدير الجدول Excel
+      </Button>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    marginTop: spacing.xl,
+  flex: { flex: 1 },
+  card: { gap: space[4] },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: space[2] },
+  days: { flexDirection: "row", gap: 4 },
+  day: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: space[2],
+    borderRadius: radius.md,
+    gap: 2,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  weekNav: {
+  daySelected: { backgroundColor: colors.primary },
+  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "transparent" },
+  dotOn: { backgroundColor: colors.accent },
+  dotOnSelected: { backgroundColor: colors.onPrimary },
+  list: { gap: space[2] },
+  session: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.sm,
+    gap: space[3],
+    padding: space[3],
+    borderRadius: radius.md,
   },
-  weekNavBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: centerColors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  weekLabel: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: centerColors.text,
-  },
-  resetWeek: {
-    alignSelf: "center",
-    marginBottom: spacing.md,
-  },
-  resetWeekText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: centerColors.accent,
-  },
-  tableScroll: {
-    marginHorizontal: -spacing.lg,
-  },
-  tableScrollContent: {
-    paddingHorizontal: spacing.lg,
-  },
-  table: {
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: centerColors.cardBg,
-  },
-  tableRow: {
-    flexDirection: "row",
-  },
-  cell: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-    borderBottomWidth: 1,
-    borderLeftWidth: 1,
-    borderColor: centerColors.cardBorder,
-    justifyContent: "center",
-    minHeight: 64,
-  },
-  timeHeaderCell: {
-    width: TIME_COL_WIDTH,
-    backgroundColor: centerColors.accent,
-    borderLeftWidth: 0,
-    minHeight: 44,
-  },
-  dayHeaderCell: {
-    width: DAY_COL_WIDTH,
-    backgroundColor: centerColors.accent,
-    minHeight: 44,
-    alignItems: "center",
-  },
-  headerText: {
-    color: centerColors.textOnAccent,
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  timeCell: {
-    width: TIME_COL_WIDTH,
-    backgroundColor: centerColors.surfaceMuted,
-    borderLeftWidth: 0,
-    alignItems: "center",
-  },
-  timeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: centerColors.textSecondary,
-  },
-  dayCell: {
-    width: DAY_COL_WIDTH,
-    alignItems: "center",
-  },
-  emptyCell: {
-    fontSize: 12,
-    color: centerColors.textMuted,
-    textAlign: "center",
-  },
-  pill: {
-    width: "100%",
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-  },
-  pillTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 2,
-  },
-  pillMeta: {
-    fontSize: 10,
-    fontWeight: "600",
-    textAlign: "center",
-    opacity: 0.9,
-  },
-  errorText: {
-    fontSize: 14,
-    color: centerColors.accentRed,
-    textAlign: "center",
-  },
-  emptyWeekHint: {
-    marginTop: spacing.md,
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-  },
+  sessionCancelled: { opacity: 0.7 },
+  time: { alignItems: "center", minWidth: 56 },
+  timeRule: { width: 2, alignSelf: "stretch", borderRadius: 1, backgroundColor: colors.primaryMuted },
+  strike: { textDecorationLine: "line-through" },
+  export: { alignSelf: "flex-start" },
 });

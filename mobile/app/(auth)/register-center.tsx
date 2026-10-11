@@ -1,404 +1,255 @@
-import { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-} from "react-native";
+import { useRef, useState } from "react";
+import { StyleSheet, View, type TextInput } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import ScreenContainer from "@/src/components/ScreenContainer";
-import Input from "@/src/components/Input";
-import Button from "@/src/components/Button";
-import { colors, spacing, centerColors } from "@/constants";
+import { space } from "@/src/theme";
 import {
-  filterDigitsOnly,
-  isDigitsOnlyPassword,
-  PASSWORD_DIGITS_ERROR_AR,
-} from "@/src/utils/password";
-import {
-  registerCenterApi,
-  setPendingRegistrationPhone,
-  type RegisterCenterRequest,
-} from "@/src/api/auth";
+  Banner,
+  Button,
+  Card,
+  ChoiceChips,
+  Header,
+  PhoneField,
+  Screen,
+  Section,
+  Text,
+  TextField,
+  type ChoiceOption,
+} from "@/src/ui";
+import BrandMark from "@/src/components/BrandMark";
+import { registerCenter, setPendingRegistrationPhone } from "@/src/api/auth";
+import { PASSWORD_HINT, validatePassword } from "@/src/constants/domain";
+import { DEFAULT_COUNTRY, toInternational, toLatinDigits, validatePhone } from "@/src/constants/phone";
 
-const SPECIALIZATIONS = [
-  {
-    id: "mutor",
-    title: "مطور",
-    subtitle: "برنامج تطوير الحفظ",
-    icon: "book-open-variant" as const,
-  },
-  {
-    id: "dawa",
-    title: "دعوة",
-    subtitle: "برنامج الدعوة",
-    icon: "send" as const,
-  },
-  {
-    id: "atruja",
-    title: "أترجة",
-    subtitle: "برنامج الأترجة",
-    icon: "star-four-points-outline" as const,
-  },
-  {
-    id: "courses",
-    title: "دورات",
-    subtitle: "الدورات التدريبية",
-    icon: "book-multiple" as const,
-  },
-  {
-    id: "siraj",
-    title: "سراج منير",
-    subtitle: "برنامج سراج منير",
-    icon: "white-balance-sunny" as const,
-  },
+type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
+
+/** تخصصات المركز — مطابقة للخادم (VALID_SPECIALIZATIONS) */
+type Specialization = "mutor" | "dawa" | "atruja" | "courses" | "siraj";
+
+const SPECIALIZATIONS: Array<ChoiceOption<Specialization> & { icon: IconName }> = [
+  { id: "mutor", label: "مطور", icon: "book-open-variant" },
+  { id: "dawa", label: "دعوة", icon: "send-outline" },
+  { id: "atruja", label: "أترجة", icon: "star-four-points-outline" },
+  { id: "courses", label: "دورات", icon: "certificate-outline" },
+  { id: "siraj", label: "سراج منير", icon: "white-balance-sunny" },
 ];
 
-function normalizePhone(phone: string): string {
-  return phone.trim().replace(/\s/g, "");
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type Form = {
+  centerName: string;
+  supervisorName: string;
+  email: string;
+  phone: string;
+  password: string;
+  confirmPassword: string;
+  specializations: Specialization[];
+};
+
+type Errors = Partial<Record<keyof Form, string>>;
+
+const INITIAL: Form = {
+  centerName: "",
+  supervisorName: "",
+  email: "",
+  phone: "",
+  password: "",
+  confirmPassword: "",
+  specializations: [],
+};
+
+function validate(form: Form, phoneError: string | null): Errors {
+  const e: Errors = {};
+  if (form.centerName.trim().length < 3) e.centerName = "اكتبي اسم المركز";
+  if (form.supervisorName.trim().length < 3) e.supervisorName = "اكتبي اسم المشرفة";
+  if (form.email.trim() && !EMAIL_REGEX.test(form.email.trim())) e.email = "البريد الإلكتروني غير صالح";
+  if (phoneError) e.phone = phoneError;
+  const pass = validatePassword(form.password);
+  if (pass) e.password = pass;
+  else if (form.password !== form.confirmPassword) e.confirmPassword = "كلمتا المرور غير متطابقتين";
+  if (form.specializations.length === 0) e.specializations = "اختاري تخصصاً واحداً على الأقل";
+  return e;
 }
 
-function validateForm(
-  email: string,
-  phone: string,
-  centerName: string,
-  supervisorName: string,
-  password: string,
-  selectedSpecs: Set<string>
-): string | null {
-  const trimmedEmail = email.trim();
-  if (!trimmedEmail) return "أدخل البريد الإلكتروني";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-    return "البريد الإلكتروني غير صالح";
-  }
-
-  const normalizedPhone = normalizePhone(phone);
-  if (!normalizedPhone) return "أدخل رقم الهاتف";
-  if (!/^\d{10}$/.test(normalizedPhone)) {
-    return "رقم الهاتف يجب أن يكون 10 أرقام";
-  }
-
-  if (!centerName.trim()) return "أدخل اسم المركز";
-  if (!supervisorName.trim()) return "أدخل اسم مشرفة المركز";
-  if (!password) return "أدخل الرقم السري";
-  if (!isDigitsOnlyPassword(password)) return PASSWORD_DIGITS_ERROR_AR;
-  if (selectedSpecs.size === 0) return "اختر تخصصاً واحداً على الأقل";
-
-  return null;
-}
-
+/** تسجيل مركز جديد ← رمز تحقق برسالة نصية */
 export default function RegisterCenterScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [centerName, setCenterName] = useState("");
-  const [supervisorName, setSupervisorName] = useState("");
-  const [password, setPassword] = useState("");
-  const [selectedSpecs, setSelectedSpecs] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [devCodeHint, setDevCodeHint] = useState<string | null>(null);
+  const supervisorRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
 
-  const toggleSpec = (id: string) => {
-    setSelectedSpecs((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    if (error) setError(null);
+  const [form, setForm] = useState<Form>(INITIAL);
+  const [country, setCountry] = useState(DEFAULT_COUNTRY);
+  const [errors, setErrors] = useState<Errors>({});
+
+  const set = <K extends keyof Form>(key: K, value: Form[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
   };
 
   const mutation = useMutation({
-    mutationFn: (payload: RegisterCenterRequest) =>
-      new Promise<import("@/src/api/auth").RegisterCenterResponse>(
-        (resolve, reject) => {
-          registerCenterApi(payload, resolve, reject);
-        }
-      ),
-    onSuccess: (data) => {
-      setError(null);
-      if (data.devCode) {
-        setDevCodeHint(data.devCode);
-        if (__DEV__) {
-          Alert.alert("كود التطوير", data.devCode);
-        }
-      }
-      setPendingRegistrationPhone(data.phone, () => {
-        router.push({
-          pathname: "/(auth)/register-center-verify",
-          params: { phone: data.phone },
-        } as Href);
-      });
-    },
-    onError: (err: Error) => {
-      setError(err.message ?? "فشل إنشاء الحساب");
+    mutationFn: () =>
+      registerCenter({
+        centerName: form.centerName.trim(),
+        supervisorName: form.supervisorName.trim(),
+        email: form.email.trim().toLowerCase() || undefined,
+        phone: toLatinDigits(form.phone),
+        countryCode: country.dialCode,
+        password: form.password,
+        specializations: form.specializations,
+      }),
+    onSuccess: async (data) => {
+      const phone = data.phone || toInternational(form.phone, country);
+      await setPendingRegistrationPhone(phone).catch(() => undefined);
+      router.push({
+        pathname: "/(auth)/register-center-verify",
+        params: { phone, ...(__DEV__ && data.devCode ? { devCode: data.devCode } : {}) },
+      } as Href);
     },
   });
 
-  const handleContinue = () => {
-    setError(null);
-    setDevCodeHint(null);
-
-    const validationError = validateForm(
-      email,
-      phone,
-      centerName,
-      supervisorName,
-      password,
-      selectedSpecs
-    );
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    mutation.mutate({
-      email: email.trim().toLowerCase(),
-      phone: normalizePhone(phone),
-      password,
-      centerName: centerName.trim(),
-      supervisorName: supervisorName.trim(),
-      specializations: Array.from(selectedSpecs),
-    });
+  const submit = () => {
+    const next = validate(form, validatePhone(form.phone, country));
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    mutation.mutate();
   };
 
   return (
-    <ScreenContainer>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>إنشاء حساب مركز جديد</Text>
-          <View style={styles.headerDots}>
-            <View style={[styles.dot, styles.dotGreen]} />
-            <View style={[styles.dot, styles.dotYellow]} />
-            <View style={[styles.dot, styles.dotRed]} />
-          </View>
-        </View>
-
-        <View style={styles.logoBox}>
-          <MaterialCommunityIcons
-            name="diamond-stone"
-            size={48}
-            color={colors.textSecondary}
-          />
-        </View>
-        <Text style={styles.logoTitle}>مطور</Text>
-        <Text style={styles.logoSubtitle}>منصة إدارة مراكز القرآن</Text>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <Input
-          label="البريد الإلكتروني"
-          required
-          value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            if (error) setError(null);
-          }}
-          placeholder="example@center.com"
-          keyboardType="email-address"
-          autoComplete="email"
-          accessibilityLabel="البريد الإلكتروني"
-        />
-        <Input
-          label="رقم الهاتف"
-          required
-          value={phone}
-          onChangeText={(text) => {
-            setPhone(text);
-            if (error) setError(null);
-          }}
-          placeholder="05XXXXXXXX"
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          accessibilityLabel="رقم الهاتف"
-        />
-        <Input
-          label="اسم المركز"
-          required
-          value={centerName}
-          onChangeText={(text) => {
-            setCenterName(text);
-            if (error) setError(null);
-          }}
-          placeholder="مركز النور"
-          accessibilityLabel="اسم المركز"
-        />
-        <Input
-          label="اسم مشرفة المركز"
-          required
-          value={supervisorName}
-          onChangeText={(text) => {
-            setSupervisorName(text);
-            if (error) setError(null);
-          }}
-          placeholder="أ. فاطمة الأحمد"
-          accessibilityLabel="اسم مشرفة المركز"
-        />
-        <Input
-          label="الرقم السري"
-          required
-          value={password}
-          onChangeText={(text) => {
-            setPassword(filterDigitsOnly(text));
-            if (error) setError(null);
-          }}
-          placeholder="أرقام فقط — 6 على الأقل"
-          secureTextEntry
-          keyboardType="number-pad"
-          autoComplete="new-password"
-          accessibilityLabel="الرقم السري"
-        />
-
-        <Text style={styles.specTitle}>
-          المركز متخصص بـ * (اختيار واحد أو أكثر)
-        </Text>
-        <View style={styles.specGrid}>
-          {SPECIALIZATIONS.map((spec) => (
-            <Pressable
-              key={spec.id}
-              style={[
-                styles.specCard,
-                selectedSpecs.has(spec.id) && styles.specCardSelected,
-              ]}
-              onPress={() => toggleSpec(spec.id)}
-            >
-              <MaterialCommunityIcons
-                name={spec.icon}
-                size={28}
-                color={
-                  selectedSpecs.has(spec.id)
-                    ? colors.primary
-                    : colors.textSecondary
-                }
-              />
-              <Text
-                style={[
-                  styles.specCardTitle,
-                  selectedSpecs.has(spec.id) && styles.specCardTitleSelected,
-                ]}
-              >
-                {spec.title}
-              </Text>
-              <Text style={styles.specCardSubtitle}>{spec.subtitle}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {devCodeHint ? (
-          <Text style={styles.devCodeHint}>كود التطوير: {devCodeHint}</Text>
-        ) : null}
-
-        <View style={styles.buttonWrapper}>
-          <Button
-            onPress={handleContinue}
-            loading={mutation.isPending}
-            accessibilityLabel="متابعة"
-          >
-            متابعة
+    <Screen
+      header={<Header back={"/(auth)/welcome" as Href} title="تسجيل مركز جديد" />}
+      footer={
+        <View style={styles.footer}>
+          <Button size="lg" fullWidth icon="arrow-left" iconPosition="end" loading={mutation.isPending} onPress={submit}>
+            متابعة وإرسال رمز التحقق
+          </Button>
+          <Button variant="ghost" fullWidth onPress={() => router.replace("/(auth)/login" as Href)}>
+            لديكِ حساب؟ تسجيل الدخول
           </Button>
         </View>
-      </ScrollView>
-    </ScreenContainer>
+      }
+    >
+      <View style={styles.hero}>
+        <BrandMark size={52} />
+        <Text variant="title" align="center">
+          أنشئي حساب مركزكِ
+        </Text>
+        <Text variant="body" color="textSecondary" align="center">
+          أديري الطالبات والفصول والحضور والدرجات من مكان واحد.
+        </Text>
+      </View>
+
+      {mutation.isError ? (
+        <Banner tone="danger" title="تعذّر إنشاء الحساب">
+          {mutation.error.message}
+        </Banner>
+      ) : null}
+
+      <Section title="بيانات المركز">
+        <Card padding={4} style={styles.card}>
+          <TextField
+            label="اسم المركز"
+            required
+            value={form.centerName}
+            onChangeText={(v) => set("centerName", v)}
+            placeholder="مثال: دار النور لتحفيظ القرآن"
+            icon="domain"
+            returnKeyType="next"
+            onSubmitEditing={() => supervisorRef.current?.focus()}
+            error={errors.centerName}
+          />
+          <TextField
+            ref={supervisorRef}
+            label="اسم المشرفة"
+            required
+            value={form.supervisorName}
+            onChangeText={(v) => set("supervisorName", v)}
+            placeholder="الاسم الكامل"
+            icon="account-outline"
+            autoComplete="name"
+            textContentType="name"
+            returnKeyType="next"
+            onSubmitEditing={() => emailRef.current?.focus()}
+            error={errors.supervisorName}
+          />
+          <ChoiceChips<Specialization>
+            label="تخصصات المركز"
+            required
+            multiple
+            options={SPECIALIZATIONS}
+            value={form.specializations}
+            onChange={(v: Specialization[]) => set("specializations", v)}
+            error={errors.specializations}
+          />
+        </Card>
+      </Section>
+
+      <Section title="بيانات الدخول" subtitle="سيصلكِ رمز تحقق على رقم الهاتف لتفعيل الحساب">
+        <Card padding={4} style={styles.card}>
+          <PhoneField
+            required
+            country={country}
+            onCountryChange={setCountry}
+            value={form.phone}
+            onChangeText={(v) => set("phone", v)}
+            error={errors.phone}
+            hint="يُستخدم لتسجيل الدخول"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+          />
+          <TextField
+            ref={emailRef}
+            label="البريد الإلكتروني"
+            value={form.email}
+            onChangeText={(v) => set("email", v)}
+            placeholder="center@example.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
+            icon="email-outline"
+            ltr
+            hint="اختياري"
+            error={errors.email}
+          />
+          <TextField
+            ref={passwordRef}
+            label="كلمة المرور"
+            required
+            value={form.password}
+            onChangeText={(v) => set("password", toLatinDigits(v))}
+            secureTextEntry
+            keyboardType="number-pad"
+            textContentType="newPassword"
+            autoComplete="new-password"
+            icon="lock-outline"
+            hint={PASSWORD_HINT}
+            returnKeyType="next"
+            onSubmitEditing={() => confirmRef.current?.focus()}
+            error={errors.password}
+          />
+          <TextField
+            ref={confirmRef}
+            label="تأكيد كلمة المرور"
+            required
+            value={form.confirmPassword}
+            onChangeText={(v) => set("confirmPassword", toLatinDigits(v))}
+            secureTextEntry
+            keyboardType="number-pad"
+            icon="lock-check-outline"
+            returnKeyType="done"
+            onSubmitEditing={submit}
+            error={errors.confirmPassword}
+          />
+        </Card>
+      </Section>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: spacing.xxl },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.xl,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  headerDots: { flexDirection: "row", gap: spacing.sm },
-  dot: { width: 12, height: 12, borderRadius: 6 },
-  dotGreen: { backgroundColor: centerColors.cardBorder },
-  dotYellow: { backgroundColor: centerColors.cardBorder },
-  dotRed: { backgroundColor: centerColors.cardBorder },
-  logoBox: {
-    width: 120,
-    height: 120,
-    borderRadius: 16,
-    backgroundColor: centerColors.surfaceMuted,
-    alignSelf: "center",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.sm,
-  },
-  logoTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: colors.text,
-    textAlign: "center",
-    marginBottom: spacing.xs,
-  },
-  logoSubtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: "center",
-    marginBottom: spacing.xl,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 14,
-    marginBottom: spacing.md,
-    textAlign: "center",
-  },
-  specTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: colors.text,
-    marginBottom: spacing.md,
-  },
-  specGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  specCard: {
-    width: "47%",
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: spacing.md,
-    backgroundColor: colors.background,
-  },
-  specCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: centerColors.surfaceMuted,
-  },
-  specCardTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: colors.text,
-    marginTop: spacing.xs,
-  },
-  specCardTitleSelected: { color: colors.primary },
-  specCardSubtitle: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  devCodeHint: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    textAlign: "center",
-    marginBottom: spacing.sm,
-  },
-  buttonWrapper: { marginTop: spacing.sm },
+  hero: { alignItems: "center", gap: space[2], marginTop: space[2], marginBottom: space[4] },
+  card: { gap: space[4] },
+  footer: { gap: space[1] },
 });

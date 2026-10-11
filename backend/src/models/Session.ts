@@ -56,6 +56,11 @@ const sessionSchema = new Schema(
 
 sessionSchema.index({ centerId: 1, startAt: 1 });
 sessionSchema.index({ centerId: 1, levelId: 1, startAt: 1 });
+/** حصة واحدة لكل فصل في كل موعد — يمنع التكرار عند توليد الجدول الأسبوعي */
+sessionSchema.index(
+  { classOfferId: 1, startAt: 1 },
+  { unique: true, partialFilterExpression: { classOfferId: { $type: 'objectId' } } }
+);
 
 export type SessionDocument = InferSchemaType<typeof sessionSchema> & {
   _id: Types.ObjectId;

@@ -1,77 +1,66 @@
 import type { Types } from 'mongoose';
 import { Level } from '../models/Level';
+import {
+  LEVEL_TRACK_RANGES,
+  LEVEL_TRACKS,
+  levelFullName,
+  levelShortName,
+  type LevelTrack,
+} from '../constants/tracks';
 
-export const MEMORIZATION_LEVELS = [
-  { shortName: 'تمهيدي', fullName: 'المستوى التمهيدي', order: 0 },
-  { shortName: 'مستوى مطور ١', fullName: 'المستوى الأول مطور', order: 1 },
-  { shortName: 'مستوى مطور ٢', fullName: 'المستوى الثاني مطور', order: 2 },
-  { shortName: 'مستوى مطور ٣', fullName: 'المستوى الثالث مطور', order: 3 },
-  { shortName: 'مستوى مطور ٤', fullName: 'المستوى الرابع مطور', order: 4 },
-  { shortName: 'مستوى مطور ٥', fullName: 'المستوى الخامس مطور', order: 5 },
-  { shortName: 'مستوى مطور ٦', fullName: 'المستوى السادس مطور', order: 6 },
-  { shortName: 'مستوى مطور ٧', fullName: 'المستوى السابع مطور', order: 7 },
-  { shortName: 'مستوى مطور ٨', fullName: 'المستوى الثامن مطور', order: 8 },
-] as const;
-
-/** ترتيب المستوى التمهيدي — الافتراضي عند الإضافة اليدوية */
-export const PREPARATORY_LEVEL_ORDER = 0;
-
-/** مدة الترم في مسار المطور (أشهر) — قاعدة منتج؛ الترقية يدوية وليست تلقائية */
+/** مدة الترم (أشهر) — قاعدة منتج؛ الترقية يدوية وليست تلقائية */
 export const MUTOR_TERM_MONTHS = 3;
 
-export const MUTOR_LEVEL_ORDER_MIN = 1;
-export const MUTOR_LEVEL_ORDER_MAX = 8;
-
-/** لم يعد يُنشئ مستويات «دورات/استماع» — الدورات العلمية كيان Course منفصل */
-export const GENERAL_LEVELS: readonly {
+export type LevelSeed = {
+  track: LevelTrack;
+  order: number;
   shortName: string;
   fullName: string;
-  order: number;
-}[] = [];
-
-type LevelSeed = {
-  shortName: string;
-  fullName: string;
-  order: number;
 };
 
-async function upsertLevelsForCenter(
-  centerId: Types.ObjectId,
-  levels: readonly LevelSeed[]
-): Promise<void> {
-  for (const level of levels) {
-    const existing = await Level.findOne({ centerId, order: level.order });
-    if (existing) {
-      existing.fullName = level.fullName;
-      existing.shortName = level.shortName;
-      await existing.save();
-      continue;
-    }
-
-    await Level.create({
-      centerId,
-      fullName: level.fullName,
-      shortName: level.shortName,
-      order: level.order,
+/** سلّم المستويات الافتراضي: تمهيدي ١–٦ ثم مطور ١–٨ */
+export const DEFAULT_LEVELS: LevelSeed[] = LEVEL_TRACKS.flatMap((track) => {
+  const { min, max } = LEVEL_TRACK_RANGES[track];
+  const items: LevelSeed[] = [];
+  for (let order = min; order <= max; order += 1) {
+    items.push({
+      track,
+      order,
+      shortName: levelShortName(track, order),
+      fullName: levelFullName(track, order),
     });
   }
+  return items;
+});
+
+/** ينشئ المستويات الناقصة فقط — لا يغيّر أسماء عدّلها المركز */
+export async function ensureDefaultLevelsForCenter(centerId: Types.ObjectId): Promise<void> {
+  const existing = await Level.find({ centerId }).select('track order').lean();
+  const keys = new Set(existing.map((level) => `${level.track ?? 'mutor'}:${level.order}`));
+  const missing = DEFAULT_LEVELS.filter((seed) => !keys.has(`${seed.track}:${seed.order}`));
+  if (!missing.length) return;
+  await Level.insertMany(
+    missing.map((seed) => ({ ...seed, centerId })),
+    { ordered: false }
+  ).catch(() => undefined);
 }
 
-export async function ensureMemorizationLevelsForCenter(
-  centerId: Types.ObjectId
-): Promise<void> {
-  await upsertLevelsForCenter(centerId, MEMORIZATION_LEVELS);
-}
+/** للتوافق مع الكود القديم */
+export const ensureAllDefaultLevelsForCenter = ensureDefaultLevelsForCenter;
+export const ensureGeneralLevelsForCenter = ensureDefaultLevelsForCenter;
 
-export async function ensureGeneralLevelsForCenter(
-  _centerId: Types.ObjectId
-): Promise<void> {
-  // no-op: الدورات العلمية عبر Course وليست Level
-}
-
-export async function ensureAllDefaultLevelsForCenter(
-  centerId: Types.ObjectId
-): Promise<void> {
-  await ensureMemorizationLevelsForCenter(centerId);
-  await ensureGeneralLevelsForCenter(centerId);
+/** المستوى التالي في السلّم: تمهيدي سادس ← مطور أول */
+export async function findNextLevel(
+  centerId: Types.ObjectId,
+  current: { track?: string | null; order: number }
+) {
+  const track = (current.track ?? 'mutor') as LevelTrack;
+  const range = LEVEL_TRACK_RANGES[track];
+  if (current.order < range.max) {
+    return Level.findOne({ centerId, track, order: current.order + 1 });
+  }
+  if (track === 'preparatory') {
+    return Level.findOne({ centerId, track: 'mutor', order: LEVEL_TRACK_RANGES.mutor.min });
+  }
+  return null;
 }

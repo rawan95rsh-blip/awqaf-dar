@@ -1,205 +1,163 @@
-import { useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { useRef, useState } from "react";
+import { StyleSheet, View, type TextInput } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import ScreenContainer from "@/src/components/ScreenContainer";
-import Input from "@/src/components/Input";
-import Button from "@/src/components/Button";
+import { space } from "@/src/theme";
+import { Banner, Button, Header, PhoneField, Screen, Segmented, Text, TextField } from "@/src/ui";
+import BrandMark from "@/src/components/BrandMark";
+import { login } from "@/src/api/auth";
 import { useAuth } from "@/src/context/AuthContext";
-import { buildLoginCredentials, loginApi } from "@/src/api/auth";
-import { promptEnableBiometricsAfterLogin } from "@/src/utils/biometric";
-import { colors, spacing } from "@/constants";
+import { CIVIL_ID_LENGTH, validateCivilId } from "@/src/constants/domain";
+import { DEFAULT_COUNTRY, toLatinDigits, validatePhone } from "@/src/constants/phone";
 
-function getPostLoginRoute(role?: string): Href {
-  if (role === "student") {
-    return "/(auth)/student-home" as Href;
-  }
-  return "/main" as Href;
-}
+type Method = "phone" | "civil";
 
+/**
+ * تسجيل الدخول — تبويبان منفصلان:
+ * رقم الهاتف (مع مفتاح الدولة، الكويت 8 أرقام) أو الرقم المدني (12 رقماً)
+ */
 export default function LoginScreen() {
   const router = useRouter();
-  const { login } = useAuth();
-  const [identifier, setIdentifier] = useState("");
+  const { login: saveSession } = useAuth();
+  const passwordRef = useRef<TextInput>(null);
+
+  const [method, setMethod] = useState<Method>("phone");
+  const [country, setCountry] = useState(DEFAULT_COUNTRY);
+  const [phone, setPhone] = useState("");
+  const [civilId, setCivilId] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ phone?: string; civil?: string; password?: string }>({});
 
   const mutation = useMutation({
     mutationFn: () =>
-      new Promise<{ token: string; user: import("@/src/types/auth").User }>(
-        (resolve, reject) => {
-          loginApi(buildLoginCredentials(identifier, password), resolve, reject);
-        },
+      login(
+        method === "phone"
+          ? { phone: toLatinDigits(phone), countryCode: country.dialCode, password }
+          : { idNumber: civilId, password }
       ),
-    onSuccess: (data) => {
-      setError(null);
-      const destination = getPostLoginRoute(data.user.role);
-      login(data.token, data.user, () => {
-        promptEnableBiometricsAfterLogin(() => {
-          router.replace(destination);
-        });
+    onSuccess: ({ token, user }) => {
+      saveSession(token, user, () => {
+        router.replace((user.role === "student" ? "/student" : "/main") as Href);
       });
-    },
-    onError: (err: Error) => {
-      setError(err.message ?? "فشل تسجيل الدخول");
     },
   });
 
-  const handleSubmit = () => {
-    setError(null);
-    const trimmed = identifier.trim().replace(/\s/g, "");
-    if (!trimmed) {
-      setError("أدخلي رقم الهاتف أو الهوية المدنية");
-      return;
+  const submit = () => {
+    const next: typeof errors = {};
+    if (method === "phone") {
+      const e = validatePhone(phone, country);
+      if (e) next.phone = e;
+    } else {
+      const e = validateCivilId(civilId);
+      if (e) next.civil = e;
     }
-    if (!password) {
-      setError("أدخل كلمة المرور");
-      return;
-    }
+    if (!password) next.password = "أدخلي كلمة المرور";
+    setErrors(next);
+    if (Object.keys(next).length) return;
     mutation.mutate();
   };
 
-  const handleIdentifierChange = (text: string) => {
-    setIdentifier(text);
-    if (error) setError(null);
-  };
-
-  const handlePasswordChange = (text: string) => {
-    setPassword(text);
-    if (error) setError(null);
-  };
-
-  const handlePressRegister = () => {
-    router.push("/(auth)/register-student" as Href);
-  };
-
-  const handlePressRegisterCenter = () => {
-    router.push("/(auth)/register-center" as Href);
-  };
-
-  const handlePressBack = () => {
-    router.replace("/(auth)/welcome" as Href);
-  };
-
   return (
-    <ScreenContainer>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={handlePressBack}
-            style={styles.backButton}
-            accessibilityLabel="العودة للصفحة الرئيسية"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons
-              name="arrow-right"
-              size={24}
-              color={colors.text}
-            />
-          </Pressable>
-          <Text style={styles.title}>تسجيل الدخول</Text>
-          <View style={styles.headerSpacer} />
+    <Screen
+      header={<Header back={"/(auth)/welcome" as Href} />}
+      footer={
+        <View style={styles.footer}>
+          <Button size="lg" fullWidth loading={mutation.isPending} onPress={submit}>
+            تسجيل الدخول
+          </Button>
+          <Button variant="ghost" fullWidth onPress={() => router.push("/(auth)/register-student" as Href)}>
+            ليس لديكِ حساب؟ سجّلي الآن
+          </Button>
         </View>
+      }
+    >
+      <View style={styles.hero}>
+        <BrandMark size={56} />
+        <Text variant="title" align="center">
+          أهلاً بعودتكِ
+        </Text>
+        <Text variant="body" color="textSecondary" align="center">
+          سجّلي الدخول للمتابعة — للطالبات وإدارات المراكز
+        </Text>
+      </View>
 
-        <Input
-          value={identifier}
-          onChangeText={handleIdentifierChange}
-          placeholder="رقم الهاتف أو الهوية المدنية (12 رقماً)"
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          accessibilityLabel="رقم الهاتف أو الهوية المدنية"
-        />
-        <Input
-          value={password}
-          onChangeText={handlePasswordChange}
-          placeholder="كلمة المرور"
-          secureTextEntry
-          autoComplete="password"
-          accessibilityLabel="كلمة المرور"
+      <View style={styles.form}>
+        <Segmented<Method>
+          options={[
+            { id: "phone", label: "رقم الهاتف", icon: "phone-outline" },
+            { id: "civil", label: "الرقم المدني", icon: "card-account-details-outline" },
+          ]}
+          value={method}
+          onChange={(m) => {
+            setMethod(m);
+            setErrors({});
+            mutation.reset();
+          }}
         />
 
-        {error ? (
-          <Text
-            style={styles.errorBlock}
-            accessibilityLabel="رسالة خطأ"
-            accessibilityLiveRegion="polite"
-          >
-            {error}
-          </Text>
+        {mutation.isError ? (
+          <Banner tone="danger">{(mutation.error as Error).message}</Banner>
         ) : null}
 
-        <Button
-          onPress={handleSubmit}
-          loading={mutation.isPending}
-          disabled={mutation.isPending}
-          accessibilityLabel="تسجيل الدخول"
-        >
-          تسجيل الدخول
-        </Button>
+        {method === "phone" ? (
+          <PhoneField
+            country={country}
+            onCountryChange={setCountry}
+            value={phone}
+            onChangeText={(v) => {
+              setPhone(v);
+              if (errors.phone) setErrors((p) => ({ ...p, phone: undefined }));
+            }}
+            error={errors.phone}
+            onSubmitEditing={() => passwordRef.current?.focus()}
+          />
+        ) : (
+          <TextField
+            label="الرقم المدني"
+            value={civilId}
+            onChangeText={(v) => {
+              setCivilId(toLatinDigits(v).slice(0, CIVIL_ID_LENGTH));
+              if (errors.civil) setErrors((p) => ({ ...p, civil: undefined }));
+            }}
+            keyboardType="number-pad"
+            placeholder="12 رقماً"
+            maxLength={CIVIL_ID_LENGTH}
+            icon="card-account-details-outline"
+            ltr
+            hint="للطالبات فقط"
+            error={errors.civil}
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+          />
+        )}
 
-        <Pressable
-          onPress={handlePressRegister}
-          style={styles.registerLink}
-          accessibilityLabel="الانتقال إلى التسجيل"
-          accessibilityRole="link"
-        >
-          <Text style={styles.registerLinkText}>ليس لديك حساب؟ سجّل هنا</Text>
-        </Pressable>
-        <Pressable
-          onPress={handlePressRegisterCenter}
-          style={styles.registerLink}
-          accessibilityLabel="إنشاء حساب مركز"
-          accessibilityRole="link"
-        >
-          <Text style={styles.registerLinkText}>إنشاء حساب مركز</Text>
-        </Pressable>
+        <TextField
+          ref={passwordRef}
+          label="كلمة المرور"
+          value={password}
+          onChangeText={(v) => {
+            setPassword(toLatinDigits(v));
+            if (errors.password) setErrors((p) => ({ ...p, password: undefined }));
+          }}
+          secureTextEntry
+          keyboardType="number-pad"
+          textContentType="password"
+          autoComplete="password"
+          icon="lock-outline"
+          error={errors.password}
+          returnKeyType="go"
+          onSubmitEditing={submit}
+        />
+        <Text variant="caption" color="textMuted">
+          نسيتِ كلمة المرور؟ تواصلي مع إدارة مركزكِ لإعادة تعيينها.
+        </Text>
       </View>
-    </ScreenContainer>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    paddingVertical: spacing.xxl,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.xl,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  title: {
-    flex: 1,
-    fontSize: 24,
-    fontWeight: "700",
-    color: colors.text,
-    textAlign: "center",
-  },
-  errorBlock: {
-    color: colors.error,
-    fontSize: 14,
-    marginBottom: spacing.md,
-    textAlign: "center",
-  },
-  registerLink: {
-    marginTop: spacing.xl,
-    alignSelf: "center",
-    padding: spacing.sm,
-  },
-  registerLinkText: {
-    fontSize: 16,
-    color: colors.primary,
-    fontWeight: "500",
-  },
+  hero: { alignItems: "center", gap: space[2], marginTop: space[4], marginBottom: space[8] },
+  form: { gap: space[5] },
+  footer: { gap: space[1] },
 });

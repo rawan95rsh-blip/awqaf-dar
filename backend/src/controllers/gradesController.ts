@@ -284,7 +284,7 @@ export async function getStudentGrades(req: Request, res: Response): Promise<voi
 
     sendSuccess(res, {
       studentId: student._id.toString(),
-      levelId: student.levelId.toString(),
+      levelId: student.levelId ? student.levelId.toString() : null,
       grades: grades.map((grade) => ({
         subjectIndex: grade.subjectIndex,
         levelId: grade.levelId.toString(),

@@ -1,6 +1,6 @@
 import { apiClient, getApiErrorMessage, type ApiSuccess } from '@/src/api/client';
 import { GRADE_WEIGHTS, type GradeWeights } from '@/src/constants/grades';
-import type { GenderAudience } from '@/src/constants/genderAudience';
+import type { Gender as GenderAudience } from '@/src/constants/domain';
 
 export type CenterProfile = {
   id: string;

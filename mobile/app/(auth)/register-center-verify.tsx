@@ -1,247 +1,231 @@
-import { useState, useRef, useEffect } from "react";
-import { View, Text, StyleSheet, Pressable, TextInput } from "react-native";
-import { useRouter, useLocalSearchParams, type Href } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
-import ScreenContainer from "@/src/components/ScreenContainer";
-import Button from "@/src/components/Button";
-import { colors, spacing, centerColors } from "@/constants";
-import { useAuth } from "@/src/context/AuthContext";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { colors, space } from "@/src/theme";
+import { Banner, Button, EmptyState, Header, LoadingState, Screen, Text, useToast } from "@/src/ui";
 import {
-  verifyCenterApi,
   getPendingRegistrationPhone,
   removePendingRegistrationPhone,
+  resendCenterCode,
+  verifyCenter,
 } from "@/src/api/auth";
+import { useAuth } from "@/src/context/AuthContext";
+import { formatPhone } from "@/src/constants/phone";
 import { promptEnableBiometricsAfterLogin } from "@/src/utils/biometric";
+import OtpInput, { type OtpInputHandle } from "@/src/components/center/OtpInput";
 
+const CODE_LENGTH = 4;
+const RESEND_SECONDS = 60;
+
+/** عدّاد تنازلي بالثواني — يعيد الثواني المتبقية ودالة لإعادة التشغيل */
+function useCountdown(seconds: number) {
+  const [remaining, setRemaining] = useState(seconds);
+  useEffect(() => {
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setRemaining((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [remaining]);
+  return { remaining, restart: () => setRemaining(seconds) };
+}
+
+function formatSeconds(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+/** التحقق من رقم المركز برمز من 4 أرقام ثم الدخول مباشرة */
 export default function RegisterCenterVerifyScreen() {
   const router = useRouter();
-  const { phone: phoneParam } = useLocalSearchParams<{ phone?: string }>();
+  const toast = useToast();
   const { login } = useAuth();
-  const [registrationPhone, setRegistrationPhone] = useState<string | null>(
-    typeof phoneParam === "string" && phoneParam.trim() ? phoneParam.trim() : null
-  );
+  const params = useLocalSearchParams<{ phone?: string; devCode?: string }>();
+  const otpRef = useRef<OtpInputHandle>(null);
+
+  const [phone, setPhone] = useState<string | null>(params.phone?.trim() || null);
+  const [phoneResolved, setPhoneResolved] = useState(!!params.phone?.trim());
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<TextInput>(null);
+  const [devCode, setDevCode] = useState<string | null>(__DEV__ ? params.devCode ?? null : null);
+  const countdown = useCountdown(RESEND_SECONDS);
 
+  // عند فتح الشاشة من جديد (بعد إغلاق التطبيق) نسترجع الرقم المحفوظ
   useEffect(() => {
-    if (registrationPhone) return;
-    getPendingRegistrationPhone((storedPhone) => {
-      if (storedPhone?.trim()) {
-        setRegistrationPhone(storedPhone.trim());
-      }
-    });
-  }, [registrationPhone]);
+    if (phoneResolved) return;
+    let active = true;
+    void getPendingRegistrationPhone()
+      .then((stored) => {
+        if (active && stored?.trim()) setPhone(stored.trim());
+      })
+      .finally(() => {
+        if (active) setPhoneResolved(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [phoneResolved]);
 
-  const mutation = useMutation({
-    mutationFn: ({ phone, code: otp }: { phone: string; code: string }) =>
-      new Promise<{ token: string; user: import("@/src/types/auth").User }>(
-        (resolve, reject) => {
-          verifyCenterApi({ phone, code: otp }, resolve, reject);
-        }
-      ),
-    onSuccess: (data) => {
-      setError(null);
-      login(data.token, data.user, () => {
-        removePendingRegistrationPhone(() => {
-          promptEnableBiometricsAfterLogin(() => {
-            router.replace("/main" as Href);
-          });
-        });
+  const verifyMutation = useMutation({
+    mutationFn: (otp: string) => verifyCenter({ phone: phone!, code: otp }),
+    onSuccess: ({ token, user }) => {
+      login(token, user, () => {
+        void removePendingRegistrationPhone().catch(() => undefined);
+        promptEnableBiometricsAfterLogin(() => router.replace("/main" as Href));
       });
     },
-    onError: (err: Error) => {
-      setError(err.message ?? "فشل التحقق من الكود");
+    onError: () => {
+      setCode("");
+      otpRef.current?.focus();
     },
   });
 
-  const handleCodeChange = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 4);
-    setCode(digits);
-    if (error) setError(null);
-  };
+  const resendMutation = useMutation({
+    mutationFn: () => resendCenterCode(phone!),
+    onSuccess: (r) => {
+      countdown.restart();
+      verifyMutation.reset();
+      setCode("");
+      if (__DEV__ && r.devCode) setDevCode(r.devCode);
+      toast.success(r.message || "تم إرسال رمز جديد");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
-  const handleCreateAccount = () => {
-    if (mutation.isPending) return;
-
-    setError(null);
-
-    if (!registrationPhone) {
-      setError("لم يُعثر على رقم الهاتف. يرجى إعادة التسجيل.");
+  const submit = (otp = code) => {
+    if (!phone || verifyMutation.isPending) return;
+    if (otp.length !== CODE_LENGTH) {
+      otpRef.current?.focus();
       return;
     }
-
-    if (code.length !== 4) {
-      setError("أدخل الكود المكون من 4 أرقام");
-      return;
-    }
-
-    mutation.mutate({ phone: registrationPhone, code });
+    verifyMutation.mutate(otp);
   };
 
-  const handleGoToLogin = () => {
-    router.replace("/(auth)/login" as Href);
-  };
+  const backToRegister = () => router.replace("/(auth)/register-center" as Href);
 
-  const handleBackToRegister = () => {
-    router.replace("/(auth)/register-center" as Href);
-  };
+  if (!phoneResolved) {
+    return (
+      <Screen header={<Header back={"/(auth)/register-center" as Href} />}>
+        <LoadingState />
+      </Screen>
+    );
+  }
+
+  if (!phone) {
+    return (
+      <Screen header={<Header back={"/(auth)/welcome" as Href} />}>
+        <EmptyState
+          icon="phone-alert-outline"
+          title="لم نجد رقم التسجيل"
+          description="ابدئي تسجيل المركز من جديد ليصلكِ رمز التحقق."
+          actionLabel="تسجيل مركز جديد"
+          onAction={backToRegister}
+        />
+      </Screen>
+    );
+  }
+
+  const canResend = countdown.remaining <= 0 && !resendMutation.isPending;
 
   return (
-    <ScreenContainer>
-      <View style={styles.content}>
-        <Text style={styles.title}>الكود الخاص لإتمام الحساب *</Text>
-
-        {registrationPhone ? (
-          <Text style={styles.phoneHint}>
-            تم الإرسال إلى: {registrationPhone}
-          </Text>
-        ) : null}
-
-        <Pressable
-          style={styles.codeRow}
-          onPress={() => inputRef.current?.focus()}
-          disabled={mutation.isPending}
-        >
-          {[0, 1, 2, 3].map((i) => (
-            <View key={i} style={styles.codeDot}>
-              <Text style={styles.codeChar}>
-                {code.length > i ? code[i] : ""}
-              </Text>
-            </View>
-          ))}
-        </Pressable>
-        <TextInput
-          ref={inputRef}
-          value={code}
-          onChangeText={handleCodeChange}
-          keyboardType="number-pad"
-          maxLength={4}
-          editable={!mutation.isPending}
-          style={styles.hiddenInput}
-          accessibilityLabel="إدخال الكود المكون من 4 أرقام"
-        />
-
-        <Text style={styles.hint}>
-          {__DEV__
-            ? "في التطوير استخدمي الكود 7890"
-            : "يُرسل إليك الكود من قبل المنصة"}
-        </Text>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        {!registrationPhone ? (
-          <Pressable
-            style={styles.backLinkWrap}
-            onPress={handleBackToRegister}
-            accessibilityLabel="العودة للتسجيل"
-          >
-            <Text style={styles.loginLinkHighlight}>العودة لإنشاء الحساب</Text>
-          </Pressable>
-        ) : null}
-
-        <View style={styles.buttonWrapper}>
+    <Screen
+      header={<Header back={"/(auth)/register-center" as Href} />}
+      footer={
+        <View style={styles.footer}>
           <Button
-            onPress={handleCreateAccount}
-            loading={mutation.isPending}
-            disabled={mutation.isPending || !registrationPhone}
-            accessibilityLabel="إنشاء الحساب"
+            size="lg"
+            fullWidth
+            icon="check"
+            loading={verifyMutation.isPending}
+            disabled={code.length !== CODE_LENGTH}
+            onPress={() => submit()}
           >
-            إنشاء الحساب ←
+            تأكيد وإنشاء الحساب
+          </Button>
+          <Button variant="ghost" fullWidth onPress={backToRegister} disabled={verifyMutation.isPending}>
+            تعديل رقم الهاتف
           </Button>
         </View>
-
-        <Pressable
-          style={styles.loginLinkWrap}
-          onPress={handleGoToLogin}
-          accessibilityLabel="تسجيل الدخول"
-        >
-          <Text style={styles.loginLinkText}>
-            هل لديك حساب بالفعل ؟{" "}
-            <Text style={styles.loginLinkHighlight}>تسجيل الدخول</Text>
-          </Text>
-        </Pressable>
+      }
+    >
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}>
+          <MaterialCommunityIcons name="message-lock-outline" size={36} color={colors.primary} />
+        </View>
+        <Text variant="title" align="center">
+          أدخلي رمز التحقق
+        </Text>
+        <Text variant="body" color="textSecondary" align="center">
+          أرسلنا رمزاً من 4 أرقام برسالة نصية إلى
+        </Text>
+        <Text variant="headline" align="center" tabular>
+          {formatPhone(phone)}
+        </Text>
       </View>
-    </ScreenContainer>
+
+      <View style={styles.form}>
+        {__DEV__ && devCode ? (
+          <Banner tone="warning" icon="bug-outline" title="وضع التطوير">
+            {`رمز التحقق: ${devCode}`}
+          </Banner>
+        ) : null}
+
+        <OtpInput
+          ref={otpRef}
+          value={code}
+          onChange={(v) => {
+            setCode(v);
+            if (verifyMutation.isError) verifyMutation.reset();
+          }}
+          onComplete={(v) => submit(v)}
+          length={CODE_LENGTH}
+          error={verifyMutation.isError}
+          disabled={verifyMutation.isPending}
+        />
+
+        {verifyMutation.isError ? (
+          <Text variant="caption" color="danger" align="center">
+            {verifyMutation.error.message}
+          </Text>
+        ) : null}
+
+        <View style={styles.resend}>
+          <Text variant="caption" color="textSecondary">
+            لم يصلكِ الرمز؟
+          </Text>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="refresh"
+            onPress={() => resendMutation.mutate()}
+            loading={resendMutation.isPending}
+            disabled={!canResend}
+            accessibilityLabel={
+              canResend ? "إعادة إرسال الرمز" : `إعادة الإرسال متاحة بعد ${countdown.remaining} ثانية`
+            }
+          >
+            {canResend || resendMutation.isPending
+              ? "إعادة إرسال الرمز"
+              : `إعادة الإرسال بعد ${formatSeconds(countdown.remaining)}`}
+          </Button>
+        </View>
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flex: 1,
-    paddingTop: spacing.xxl,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  phoneHint: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    textAlign: "right",
-  },
-  codeRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  codeDot: {
-    flex: 1,
-    height: 52,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: centerColors.surfaceMuted,
+  hero: { alignItems: "center", gap: space[1], marginTop: space[4], marginBottom: space[8] },
+  heroIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: space[3],
   },
-  codeChar: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  hiddenInput: {
-    position: "absolute",
-    opacity: 0,
-    height: 1,
-    width: 1,
-    left: -9999,
-  },
-  hint: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    textAlign: "right",
-  },
-  errorText: {
-    fontSize: 14,
-    color: colors.error,
-    marginBottom: spacing.md,
-    textAlign: "center",
-  },
-  buttonWrapper: {
-    marginTop: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  backLinkWrap: {
-    alignSelf: "center",
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  loginLinkWrap: {
-    alignSelf: "center",
-    padding: spacing.sm,
-  },
-  loginLinkText: {
-    fontSize: 15,
-    color: colors.textSecondary,
-  },
-  loginLinkHighlight: {
-    color: colors.primary,
-    fontWeight: "600",
-  },
+  form: { gap: space[5] },
+  resend: { alignItems: "center", gap: space[1] },
+  footer: { gap: space[1] },
 });

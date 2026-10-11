@@ -1,969 +1,606 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  TextInput,
-  Modal,
-  I18nManager,
-  Platform,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { addClassTheme, spacing } from "@/constants";
+import { colors, radius, space } from "@/src/theme";
+import {
+  Banner,
+  Button,
+  Card,
+  ChoiceCards,
+  ChoiceChips,
+  Header,
+  InfoRow,
+  Screen,
+  SelectField,
+  Steps,
+  Text,
+  TextField,
+  useToast,
+} from "@/src/ui";
+import TimeField from "@/src/components/levels/TimeField";
+import {
+  DEFAULT_WEIGHTS,
+  WEIGHT_FIELDS,
+  durationLabel,
+  isValidTime,
+  minutesOf,
+  normalizeTime,
+  parseScore,
+  sumWeights,
+  timeRangeLabel,
+} from "@/src/components/levels/helpers";
 import { useAuth } from "@/src/context/AuthContext";
 import { fetchLevelsByCenter, levelQueryKeys } from "@/src/api/levels";
-import {
-  classOffersQueryKeys,
-  createClassOffer,
-  filterMutorLevels,
-  isMutorLevel,
-} from "@/src/api/classOffers";
-import { GRADE_WEIGHTS, type GradeWeights } from "@/src/constants/grades";
-import SelectField from "@/src/components/SelectField";
-import {
-  MODE_LABELS,
-  TRACK_LABELS,
-  type ClassMode,
-  type ClassTrack,
-} from "@/src/types/classOffer";
+import { classOffersQueryKeys, createClassOffer, levelsOfTrack, listClassOffers } from "@/src/api/classOffers";
+import { coursesQueryKeys, listCourses } from "@/src/api/courses";
 import { sessionsQueryKeys } from "@/src/api/sessions";
-const STEP_NAMES = ["المادة والنوع", "الجدول والمعلمة", "توزيع الدرجات"] as const;
+import { fetchGradeWeights, settingsQueryKeys } from "@/src/api/settings";
+import {
+  CLASS_TRACK_LABELS,
+  SUBJECT_ICONS,
+  SUBJECT_NAMES,
+  WEEKDAYS,
+  trackRequiresLevel,
+  type ClassTrack,
+} from "@/src/constants/domain";
+import type { GradeWeights } from "@/src/constants/grades";
+import { MODE_LABELS, type ClassMode } from "@/src/types/classOffer";
 
-const CLASS_TYPES: Array<{ id: ClassTrack; label: string }> = [
-  { id: "mutor", label: TRACK_LABELS.mutor },
-  { id: "courses", label: TRACK_LABELS.courses },
+const STEPS = ["المادة والنوع", "الجدول والمعلمة", "توزيع الدرجات"];
+
+const TRACK_CHOICES: Array<{ id: ClassTrack; label: string; description: string; icon: "sprout-outline" | "book-open-page-variant-outline" | "certificate-outline" }> = [
+  { id: "preparatory", label: "تمهيدي", description: "لمستوى من تمهيدي أول إلى سادس", icon: "sprout-outline" },
+  { id: "mutor", label: "مطور", description: "لمستوى من مطور أول إلى ثامن", icon: "book-open-page-variant-outline" },
+  { id: "courses", label: "دورة", description: "دورة علمية عامة لا ترتبط بمستوى", icon: "certificate-outline" },
 ];
 
-const WEEK_DAYS = [
-  { id: "0", label: "الأحد" },
-  { id: "1", label: "الإثنين" },
-  { id: "2", label: "الثلاثاء" },
-  { id: "3", label: "الأربعاء" },
-  { id: "4", label: "الخميس" },
-  { id: "5", label: "الجمعة" },
-  { id: "6", label: "السبت" },
-] as const;
-
-const SESSION_MODES: Array<{ id: ClassMode; label: string }> = [
-  { id: "in_person", label: MODE_LABELS.in_person },
-  { id: "online", label: MODE_LABELS.online },
+const MODE_CHOICES: Array<{ id: ClassMode; label: string; icon: "map-marker-outline" | "video-outline" }> = [
+  { id: "in_person", label: MODE_LABELS.in_person, icon: "map-marker-outline" },
+  { id: "online", label: MODE_LABELS.online, icon: "video-outline" },
 ];
 
-const WEIGHT_FIELDS: Array<{ key: keyof GradeWeights; label: string }> = [
-  { key: "attendance", label: "الحضور" },
-  { key: "shortExam", label: "اختبار قصير" },
-  { key: "participation", label: "المشاركة" },
-  { key: "final", label: "النهائي" },
-];
+type Form = {
+  track: ClassTrack | null;
+  levelId: string | null;
+  subjectIndex: number | null;
+  courseName: string;
+  mode: ClassMode;
+  weekday: number | null;
+  startTime: string;
+  endTime: string;
+  teacherName: string;
+  weights: GradeWeights;
+};
 
-function SummaryRow({
-  label,
-  value,
-  last,
-}: {
-  label: string;
-  value: string;
-  last?: boolean;
-}) {
-  return (
-    <View style={[summaryRowStyles.row, last && summaryRowStyles.rowLast]}>
-      <View style={summaryRowStyles.textWrap}>
-        <Text style={summaryRowStyles.label}>{label}</Text>
-        <Text style={summaryRowStyles.value} numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
+type Errors = Partial<Record<"track" | "levelId" | "subject" | "weekday" | "startTime" | "endTime" | "teacherName" | "weights", string>>;
 
-const summaryRowStyles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: addClassTheme.cardBorder,
-  },
-  rowLast: {
-    borderBottomWidth: 0,
-  },
-  textWrap: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  label: {
-    fontSize: 14,
-    color: addClassTheme.textSecondary,
-  },
-  value: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: addClassTheme.text,
-  },
-});
-
-function parseTimeHHMM(value: string): boolean {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-  if (!match) return false;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+function paramString(value: string | string[] | undefined): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 export default function AddClassScreen() {
   const router = useRouter();
+  const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const centerId = user?.centerProfile?.id;
-  const params = useLocalSearchParams<{ levelId?: string }>();
-  const preselectedLevelId =
-    typeof params.levelId === "string" ? params.levelId : null;
+  const centerId = user?.centerProfile?.id ?? "";
+  const params = useLocalSearchParams<{ levelId?: string; track?: string; subjectName?: string; subjectIndex?: string }>();
+  const paramLevelId = paramString(params.levelId);
+  const paramTrack = paramString(params.track);
+  const paramSubjectIndex = Number.parseInt(paramString(params.subjectIndex) ?? "", 10);
 
-  const [step, setStep] = useState(1);
-  const [subjectName, setSubjectName] = useState("");
-  const [classTypeId, setClassTypeId] = useState<ClassTrack | null>(
-    preselectedLevelId ? "mutor" : null
-  );
-  const [mode, setMode] = useState<ClassMode>("in_person");
-  const [levelId, setLevelId] = useState<string | null>(preselectedLevelId);
-  const [weekdayId, setWeekdayId] = useState<string | null>(null);
-  const [startTime, setStartTime] = useState("10:00");
-  const [endTime, setEndTime] = useState("11:00");
-  const [teacherName, setTeacherName] = useState("");
-  const [weights, setWeights] = useState<GradeWeights>({ ...GRADE_WEIGHTS });
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const [errors, setErrors] = useState<Errors>({});
+  const [weightsTouched, setWeightsTouched] = useState(false);
+  const [form, setForm] = useState<Form>(() => ({
+    track: paramTrack === "courses" ? "courses" : null,
+    levelId: paramLevelId,
+    subjectIndex: paramSubjectIndex >= 0 && paramSubjectIndex < SUBJECT_NAMES.length ? paramSubjectIndex : null,
+    courseName: paramTrack === "courses" ? paramString(params.subjectName) ?? "" : "",
+    mode: "in_person",
+    weekday: null,
+    startTime: "16:00",
+    endTime: "17:00",
+    teacherName: "",
+    weights: { ...DEFAULT_WEIGHTS },
+  }));
+
+  const set = <K extends keyof Form>(key: K, value: Form[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+  const clearError = (key: keyof Errors) => {
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
+  };
 
   const levelsQuery = useQuery({
-    queryKey: levelQueryKeys.list(centerId ?? ""),
-    queryFn: () => fetchLevelsByCenter(centerId!),
-    enabled: Boolean(centerId),
+    queryKey: levelQueryKeys.list(centerId),
+    queryFn: () => fetchLevelsByCenter(centerId),
+    enabled: !!centerId,
+  });
+  const coursesQuery = useQuery({
+    queryKey: coursesQueryKeys.list(),
+    queryFn: listCourses,
+    enabled: form.track === "courses",
+  });
+  const centerWeightsQuery = useQuery({
+    queryKey: settingsQueryKeys.gradeWeights,
+    queryFn: fetchGradeWeights,
+  });
+  const levelOffersQuery = useQuery({
+    queryKey: classOffersQueryKeys.list({ levelId: form.levelId ?? "" }),
+    queryFn: () => listClassOffers({ levelId: form.levelId ?? "" }),
+    enabled: !!form.levelId && trackRequiresLevel(form.track),
   });
 
-  const createMutation = useMutation({
-    mutationFn: createClassOffer,
-    onSuccess: (offer) => {
-      queryClient.invalidateQueries({ queryKey: classOffersQueryKeys.all });
-      queryClient.invalidateQueries({ queryKey: sessionsQueryKeys.all });
-      setCreatedSessionId(offer.nextSessionId);
-      setShowSuccessModal(true);
-    },
-    onError: (err: Error) => Alert.alert("خطأ", err.message),
-  });
+  // المستوى القادم من صفحة المستوى يحدّد المسار تلقائياً
+  useEffect(() => {
+    if (!paramLevelId || !levelsQuery.data) return;
+    const level = levelsQuery.data.find((l) => l.id === paramLevelId);
+    if (!level) return;
+    setForm((prev) => (prev.track ? prev : { ...prev, track: level.track, levelId: level.id }));
+  }, [paramLevelId, levelsQuery.data]);
 
-  const mutorLevels = useMemo(
-    () => filterMutorLevels(levelsQuery.data ?? []),
-    [levelsQuery.data]
-  );
+  // أوزان المركز الافتراضية (نفس حدود رصد الدرجات) ما لم تعدّلها المشرفة
+  useEffect(() => {
+    if (!weightsTouched && centerWeightsQuery.data) set("weights", { ...centerWeightsQuery.data });
+  }, [centerWeightsQuery.data, weightsTouched]);
 
   const levelOptions = useMemo(
     () =>
-      mutorLevels.map((level) => ({
-        id: level.id,
-        label: level.shortName || level.fullName,
-      })),
-    [mutorLevels]
+      trackRequiresLevel(form.track)
+        ? levelsOfTrack(levelsQuery.data ?? [], form.track).map((l) => ({
+            id: l.id,
+            label: l.shortName || l.fullName,
+            description: l.fullName,
+          }))
+        : [],
+    [levelsQuery.data, form.track]
   );
+  const selectedLevel = (levelsQuery.data ?? []).find((l) => l.id === form.levelId) ?? null;
+  const subjectName =
+    form.track === "courses" ? form.courseName.trim() : form.subjectIndex != null ? SUBJECT_NAMES[form.subjectIndex] : "";
+  const weightsTotal = sumWeights(form.weights);
+  const timesValid = isValidTime(form.startTime) && isValidTime(form.endTime);
+  const duration = timesValid ? durationLabel(form.startTime, form.endTime) : null;
 
-  useEffect(() => {
-    if (!levelsQuery.data || !levelId) return;
-    const level = levelsQuery.data.find((item) => item.id === levelId);
-    if (!level || !isMutorLevel(level)) {
-      setLevelId(null);
-    }
-  }, [levelsQuery.data, levelId]);
-
-  const selectedLevel = useMemo(
-    () => mutorLevels.find((level) => level.id === levelId) ?? null,
-    [mutorLevels, levelId]
+  const sameDayOffers = useMemo(
+    () =>
+      form.weekday == null
+        ? []
+        : (levelOffersQuery.data ?? [])
+            .filter((o) => o.weekday === form.weekday)
+            .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+    [levelOffersQuery.data, form.weekday]
   );
+  const clash = timesValid
+    ? sameDayOffers.find(
+        (o) => minutesOf(o.startTime) < minutesOf(form.endTime) && minutesOf(o.endTime) > minutesOf(form.startTime)
+      )
+    : undefined;
 
-  const selectedClassType = CLASS_TYPES.find((item) => item.id === classTypeId);
-  const selectedWeekday = WEEK_DAYS.find((item) => item.id === weekdayId);
-  const isMutorTrack = classTypeId === "mutor";
-  const isCourseTrack = classTypeId === "courses";
-
-  const weightsTotal =
-    weights.attendance + weights.shortExam + weights.participation + weights.final;
-
-  const canProceedStep1 =
-    subjectName.trim().length > 0 &&
-    Boolean(classTypeId) &&
-    (isCourseTrack || Boolean(levelId));
-
-  const canProceedStep2 =
-    Boolean(weekdayId) &&
-    parseTimeHHMM(startTime) &&
-    parseTimeHHMM(endTime) &&
-    teacherName.trim().length > 0;
-
-  const handleSelectClassType = (nextType: ClassTrack) => {
-    setClassTypeId(nextType);
-    if (nextType === "courses") {
-      setLevelId(null);
-      return;
-    }
-    if (preselectedLevelId) {
-      const level = (levelsQuery.data ?? []).find(
-        (item) => item.id === preselectedLevelId
-      );
-      if (level && isMutorLevel(level)) {
-        setLevelId(preselectedLevelId);
+  const mutation = useMutation({
+    mutationFn: () =>
+      createClassOffer({
+        track: form.track!,
+        levelId: trackRequiresLevel(form.track) ? form.levelId : null,
+        subjectName,
+        subjectIndex: form.subjectIndex ?? undefined,
+        mode: form.mode,
+        weekday: form.weekday!,
+        startTime: normalizeTime(form.startTime),
+        endTime: normalizeTime(form.endTime),
+        teacherName: form.teacherName.trim(),
+        gradeWeights: form.weights,
+      }),
+    onSuccess: (offer) => {
+      void queryClient.invalidateQueries({ queryKey: classOffersQueryKeys.all });
+      void queryClient.invalidateQueries({ queryKey: sessionsQueryKeys.all });
+      toast.success(`أُضيف فصل «${offer.subjectName}» — يتكرر كل ${WEEKDAYS[offer.weekday]}`);
+      if (offer.levelId && offer.levelId !== paramLevelId) {
+        router.replace(`/main/level/${offer.levelId}` as Href);
+      } else if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace((offer.levelId ? `/main/level/${offer.levelId}` : "/main/classes") as Href);
       }
+    },
+  });
+  const isClashError = mutation.isError && /يتعارض/.test((mutation.error as Error).message);
+
+  const validateStep = (index: number): Errors => {
+    const e: Errors = {};
+    if (index === 0) {
+      if (!form.track) e.track = "اختاري نوع الفصل";
+      if (trackRequiresLevel(form.track) && !form.levelId) e.levelId = "اختاري المستوى";
+      if (form.track === "courses" && form.courseName.trim().length < 2) e.subject = "اكتبي اسم الدورة";
+      if (trackRequiresLevel(form.track) && form.subjectIndex == null) e.subject = "اختاري المادة";
     }
+    if (index === 1) {
+      if (form.weekday == null) e.weekday = "اختاري يوم الفصل";
+      if (!isValidTime(form.startTime)) e.startTime = "وقت غير صالح — مثل 16:00";
+      if (!isValidTime(form.endTime)) e.endTime = "وقت غير صالح — مثل 17:00";
+      else if (isValidTime(form.startTime) && minutesOf(form.endTime) <= minutesOf(form.startTime))
+        e.endTime = "وقت النهاية يجب أن يكون بعد البداية";
+      if (form.teacherName.trim().length < 2) e.teacherName = "اكتبي اسم المعلمة";
+    }
+    if (index === 2) {
+      if (weightsTotal !== 100) e.weights = `مجموع الأوزان ${weightsTotal} — يجب أن يساوي 100`;
+      else if (WEIGHT_FIELDS.some((f) => form.weights[f.key] < 1)) e.weights = "كل بند يحتاج درجة واحدة على الأقل";
+    }
+    return e;
   };
 
-  const handleClose = () => router.back();
-  const handleBack = () => {
-    if (step === 1) router.back();
-    else setStep((prev) => (prev - 1) as 1 | 2 | 3);
+  const next = () => {
+    const e = validateStep(step);
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    if (step < STEPS.length - 1) {
+      setStep(step + 1);
+      return;
+    }
+    mutation.mutate();
   };
 
-  const handleNext = () => {
-    if (step === 1 && !canProceedStep1) {
-      Alert.alert(
-        "تنبيه",
-        isMutorTrack
-          ? "أكملي اسم المادة ونوع المطور ومستوى المطور (١–٨)"
-          : "أكملي اسم المادة ونوع الفصل"
-      );
-      return;
-    }
-    if (step === 2 && !canProceedStep2) {
-      Alert.alert("تنبيه", "أكملي اليوم والوقت واسم المعلمة بصيغة 10:00");
-      return;
-    }
-    setStep((prev) => (prev + 1) as 1 | 2 | 3);
-  };
+  const back = () => (step === 0 ? router.back() : setStep(step - 1));
 
-  const handleCreate = () => {
-    if (!canProceedStep1 || !canProceedStep2 || !selectedWeekday || !classTypeId) {
-      Alert.alert("تنبيه", "أكملي جميع الحقول أولاً");
-      return;
-    }
-    if (classTypeId === "mutor" && !levelId) {
-      Alert.alert("تنبيه", "فصل المطور يتطلب اختيار مستوى مطور (١–٨)");
-      return;
-    }
-    if (weightsTotal !== 100) {
-      Alert.alert("تنبيه", "مجموع أوزان الدرجات يجب أن يساوي 100");
-      return;
-    }
-    if (!parseTimeHHMM(startTime) || !parseTimeHHMM(endTime)) {
-      Alert.alert("تنبيه", "صيغة الوقت غير صالحة — استخدمي مثل 10:00");
-      return;
-    }
-
-    createMutation.mutate({
-      track: classTypeId,
-      levelId: classTypeId === "courses" ? null : levelId,
-      subjectName: subjectName.trim(),
-      mode,
-      weekday: Number(selectedWeekday.id),
-      startTime: startTime.trim(),
-      endTime: endTime.trim(),
-      teacherName: teacherName.trim(),
-      gradeWeights: { ...weights },
+  const chooseTrack = (track: ClassTrack) => {
+    setForm((prev) => {
+      const prevLevel = (levelsQuery.data ?? []).find((l) => l.id === prev.levelId);
+      // المستوى المختار يبقى فقط إن كان من نفس المسار
+      return { ...prev, track, levelId: prevLevel?.track === track ? prev.levelId : null };
     });
+    setErrors({});
   };
 
-  const handleCloseSuccess = () => {
-    setShowSuccessModal(false);
-    if (classTypeId === "mutor" && levelId) {
-      router.replace(`/main/level/${levelId}` as Href);
-      return;
-    }
-    router.replace("/main/classes" as Href);
+  const updateWeight = (key: keyof GradeWeights, text: string) => {
+    setWeightsTouched(true);
+    setForm((prev) => ({ ...prev, weights: { ...prev.weights, [key]: parseScore(text, 100) } }));
+    clearError("weights");
   };
-
-  const handleOpenDraftSession = () => {
-    setShowSuccessModal(false);
-    if (createdSessionId) {
-      router.replace(`/main/session/${createdSessionId}` as Href);
-      return;
-    }
-    handleCloseSuccess();
-  };
-
-  const updateWeight = (key: keyof GradeWeights, raw: string) => {
-    const n = Number(raw.replace(/[^\d]/g, ""));
-    if (!Number.isFinite(n)) return;
-    setWeights((prev) => ({ ...prev, [key]: Math.min(100, Math.max(0, n)) }));
-  };
-
-  const isSaving = createMutation.isPending;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <View style={styles.header}>
-        <Pressable
-          style={styles.headerButton}
-          onPress={handleBack}
-          accessibilityLabel="رجوع"
-        >
-          <Text style={styles.headerBackIcon}>
-            {I18nManager.isRTL ? "→" : "←"}
-          </Text>
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>إضافة فصل جديد</Text>
-          <Text style={styles.headerSubtitle}>
-            الخطوة {step} من 3 — {STEP_NAMES[step - 1]}
-          </Text>
-          <View style={styles.progressBar}>
-            {[1, 2, 3].map((i) => (
-              <View
-                key={i}
-                style={[
-                  styles.progressSegment,
-                  i < step && styles.progressSegmentCompleted,
-                  i === step && styles.progressSegmentActive,
-                ]}
-              />
-            ))}
-          </View>
+    <Screen
+      scrollKey={step}
+      header={<Header title="فصل جديد" onBack={back} />}
+      footer={
+        <View style={styles.footer}>
+          {step > 0 ? (
+            <Button variant="secondary" onPress={() => setStep(step - 1)} disabled={mutation.isPending} style={styles.footerBack}>
+              السابق
+            </Button>
+          ) : null}
+          <Button
+            size="lg"
+            onPress={next}
+            loading={mutation.isPending}
+            icon={step === STEPS.length - 1 ? "check" : undefined}
+            style={styles.flex}
+          >
+            {step === STEPS.length - 1 ? "إنشاء الفصل" : "التالي"}
+          </Button>
         </View>
-        <Pressable
-          style={styles.headerButton}
-          onPress={handleClose}
-          accessibilityLabel="إغلاق"
-        >
-          <Text style={styles.headerCloseIcon}>✕</Text>
-        </Pressable>
-      </View>
+      }
+    >
+      <Steps steps={STEPS} current={step} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.previewBanner}>
-          <Text style={styles.previewBannerText}>
-            يُحفظ الفصل على الخادم ويُنشأ أول موعد حصة قادم تلقائياً. رابط Zoom لاحقاً.
-          </Text>
-        </View>
+      <View style={styles.form}>
+        {step === 0 ? (
+          <>
+            <ChoiceCards
+              label="نوع الفصل"
+              required
+              options={TRACK_CHOICES}
+              value={form.track}
+              onChange={chooseTrack}
+              error={errors.track}
+            />
+
+            {trackRequiresLevel(form.track) ? (
+              <>
+                <SelectField
+                  label={`مستوى ال${CLASS_TRACK_LABELS[form.track]}`}
+                  required
+                  options={levelOptions}
+                  value={form.levelId}
+                  onChange={(id) => {
+                    set("levelId", id);
+                    clearError("levelId");
+                  }}
+                  placeholder={levelsQuery.isLoading ? "جاري تحميل المستويات…" : "اختاري المستوى"}
+                  disabled={levelsQuery.isLoading}
+                  emptyText={`لا توجد مستويات ${CLASS_TRACK_LABELS[form.track]} — أضيفيها من تبويب المستويات`}
+                  error={errors.levelId ?? (levelsQuery.isError ? (levelsQuery.error as Error).message : null)}
+                />
+                <ChoiceChips
+                  label="المادة"
+                  required
+                  options={SUBJECT_NAMES.map((name, i) => ({ id: String(i), label: name, icon: SUBJECT_ICONS[i] }))}
+                  value={form.subjectIndex == null ? null : String(form.subjectIndex)}
+                  onChange={(id: string) => {
+                    set("subjectIndex", Number(id));
+                    clearError("subject");
+                  }}
+                  error={errors.subject}
+                />
+              </>
+            ) : null}
+
+            {form.track === "courses" ? (
+              <>
+                <TextField
+                  label="اسم الدورة"
+                  required
+                  value={form.courseName}
+                  onChangeText={(v) => {
+                    set("courseName", v);
+                    clearError("subject");
+                  }}
+                  placeholder="مثال: أعمال القلوب"
+                  maxLength={80}
+                  error={errors.subject}
+                />
+                {(coursesQuery.data ?? []).length ? (
+                  <ChoiceChips
+                    label="أو اختاري من دورات المركز"
+                    options={(coursesQuery.data ?? []).map((c) => ({ id: c.name, label: c.name }))}
+                    value={form.courseName.trim() || null}
+                    onChange={(name: string) => {
+                      set("courseName", name);
+                      clearError("subject");
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : null}
+
+            {form.track ? (
+              <ChoiceChips
+                label="طريقة الحضور"
+                required
+                options={MODE_CHOICES}
+                value={form.mode}
+                onChange={(mode: ClassMode) => set("mode", mode)}
+              />
+            ) : null}
+
+            {form.mode === "online" ? (
+              <Banner tone="info" title="فصل أونلاين">
+                بعد الإنشاء أضيفي رابط Zoom من صفحة الحصة ليظهر زر الانضمام للطالبات.
+              </Banner>
+            ) : null}
+          </>
+        ) : null}
 
         {step === 1 ? (
           <>
-            <View style={styles.sectionTitleWrap}>
-              <View style={styles.sectionBlueLine} />
-              <Text style={styles.sectionTitle}>
-                {isMutorTrack ? "المادة ومستوى المطور" : "المادة ونوع الفصل"}
-              </Text>
-            </View>
-            <View style={styles.formCard}>
-              <View style={styles.formField}>
-                <Text style={styles.formLabel}>اسم المادة *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={subjectName}
-                  onChangeText={setSubjectName}
-                  placeholder="مثال: السيرة"
-                  placeholderTextColor={addClassTheme.textSecondary}
-                  accessibilityLabel="اسم المادة"
-                />
-              </View>
-              <View style={styles.formDivider} />
-              <Text style={styles.formLabel}>نوع الفصل *</Text>
-              <View style={styles.chipRow}>
-                {CLASS_TYPES.map((option) => {
-                  const selected = classTypeId === option.id;
-                  return (
-                    <Pressable
-                      key={option.id}
-                      onPress={() => handleSelectClassType(option.id)}
-                      style={[styles.chip, selected && styles.chipSelected]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                    >
-                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <View style={styles.formDivider} />
-              <Text style={styles.formLabel}>حضوري أو أونلاين *</Text>
-              <View style={styles.chipRow}>
-                {SESSION_MODES.map((option) => {
-                  const selected = mode === option.id;
-                  return (
-                    <Pressable
-                      key={option.id}
-                      onPress={() => setMode(option.id)}
-                      style={[styles.chip, selected && styles.chipSelected]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                    >
-                      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+            <ChoiceChips
+              label="يوم الفصل الأسبوعي"
+              required
+              options={WEEKDAYS.map((day, i) => ({ id: String(i), label: day }))}
+              value={form.weekday == null ? null : String(form.weekday)}
+              onChange={(id: string) => {
+                set("weekday", Number(id));
+                clearError("weekday");
+              }}
+              error={errors.weekday}
+            />
 
-            {isMutorTrack ? (
-              levelsQuery.isLoading ? (
-                <ActivityIndicator
-                  color={addClassTheme.accentBlue}
-                  style={{ marginTop: spacing.lg }}
+            <View style={styles.row}>
+              <View style={styles.flex}>
+                <TimeField
+                  label="من"
+                  value={form.startTime}
+                  onChange={(v) => {
+                    set("startTime", v);
+                    clearError("startTime");
+                  }}
+                  error={errors.startTime}
                 />
-              ) : (
-                <View style={{ marginTop: spacing.md }}>
-                  <SelectField
-                    label="مستوى المطور"
-                    required
-                    value={levelId}
-                    options={levelOptions}
-                    onSelect={setLevelId}
-                    placeholder={
-                      levelOptions.length > 0
-                        ? "اختر مطور ١ … مطور ٨"
-                        : "لا توجد مستويات مطور"
-                    }
-                    disabled={levelOptions.length === 0}
-                    accessibilityLabel="مستوى المطور"
-                  />
-                </View>
-              )
+              </View>
+              <View style={styles.flex}>
+                <TimeField
+                  label="إلى"
+                  value={form.endTime}
+                  onChange={(v) => {
+                    set("endTime", v);
+                    clearError("endTime");
+                  }}
+                  error={errors.endTime}
+                />
+              </View>
+            </View>
+            {duration ? (
+              <Text variant="caption" color="textSecondary">
+                {`مدة الحصة: ${duration}`}
+              </Text>
             ) : null}
 
-            {isCourseTrack ? (
-              <Text style={styles.hint}>
-                فصل الدورة عام لجميع المستويات ولا يتطلب اختيار مستوى مطور.
-              </Text>
-            ) : (
-              <Text style={styles.hint}>
-                المطور سلّم مستويات من مطور ١ إلى مطور ٨. الفصل يرتبط بمطور معيّن.
-                الدورة فصل عام بلا مستوى. الحصة موعد واحد لاحقاً. Zoom من تفاصيل الحصة لاحقاً.
-              </Text>
-            )}
+            {form.weekday != null && selectedLevel ? (
+              <Card padding={3} tone={clash ? "warning" : "surface"}>
+                <Text variant="label" color={clash ? "warning" : "textSecondary"}>
+                  {`فصول ${selectedLevel.shortName} يوم ${WEEKDAYS[form.weekday]}`}
+                </Text>
+                {levelOffersQuery.isLoading ? (
+                  <Text variant="caption" color="textMuted">
+                    جاري التحقق من الجدول…
+                  </Text>
+                ) : sameDayOffers.length === 0 ? (
+                  <Text variant="caption" color="textMuted">
+                    اليوم متاح — لا فصول أخرى لهذا المستوى
+                  </Text>
+                ) : (
+                  sameDayOffers.map((o) => (
+                    <Text
+                      key={o.id}
+                      variant="caption"
+                      color={clash?.id === o.id ? "warning" : "textSecondary"}
+                      tabular
+                    >
+                      {`• ${o.subjectName} — ${timeRangeLabel(o.startTime, o.endTime)} — ${o.teacherName}`}
+                    </Text>
+                  ))
+                )}
+                {clash ? (
+                  <Text variant="caption" weight="semibold" color="warning" style={styles.clashNote}>
+                    {`الوقت المختار يتداخل مع «${clash.subjectName}» — غيّري الوقت أو اليوم`}
+                  </Text>
+                ) : null}
+              </Card>
+            ) : null}
+
+            <TextField
+              label="اسم المعلمة"
+              required
+              icon="account-tie-outline"
+              value={form.teacherName}
+              onChangeText={(v) => {
+                set("teacherName", v);
+                clearError("teacherName");
+              }}
+              placeholder="مثال: أ. نورة العتيبي"
+              maxLength={60}
+              error={errors.teacherName}
+              returnKeyType="done"
+            />
           </>
         ) : null}
 
         {step === 2 ? (
           <>
-            <View style={styles.sectionTitleWrap}>
-              <View style={[styles.sectionBlueLine, styles.sectionPurpleLine]} />
-              <Text style={styles.sectionTitle}>الجدول والمعلمة</Text>
-            </View>
-            <View style={styles.formCard}>
-              <SelectField
-                label="اليوم الأسبوعي"
-                required
-                value={weekdayId}
-                options={WEEK_DAYS.map((d) => ({ id: d.id, label: d.label }))}
-                onSelect={setWeekdayId}
-                placeholder="اختر اليوم"
-                accessibilityLabel="يوم الفصل الأسبوعي"
-              />
-              <View style={styles.formDivider} />
-              <View style={styles.formField}>
-                <Text style={styles.formLabel}>وقت البداية *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={startTime}
-                  onChangeText={setStartTime}
-                  placeholder="10:00"
-                  placeholderTextColor={addClassTheme.textSecondary}
-                  keyboardType="numbers-and-punctuation"
-                  accessibilityLabel="وقت البداية"
-                />
-              </View>
-              <View style={styles.formDivider} />
-              <View style={styles.formField}>
-                <Text style={styles.formLabel}>وقت النهاية *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={endTime}
-                  onChangeText={setEndTime}
-                  placeholder="11:00"
-                  placeholderTextColor={addClassTheme.textSecondary}
-                  keyboardType="numbers-and-punctuation"
-                  accessibilityLabel="وقت النهاية"
-                />
-              </View>
-              <View style={styles.formDivider} />
-              <View style={styles.formField}>
-                <Text style={styles.formLabel}>اسم المعلمة *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={teacherName}
-                  onChangeText={setTeacherName}
-                  placeholder="مثال: أ. نورة"
-                  placeholderTextColor={addClassTheme.textSecondary}
-                  accessibilityLabel="اسم المعلمة"
-                />
-              </View>
-            </View>
-          </>
-        ) : null}
+            {mutation.isError ? (
+              <Banner
+                tone="danger"
+                title={isClashError ? "تعارض في الجدول" : "تعذّر إنشاء الفصل"}
+                action={
+                  isClashError ? (
+                    <Button variant="dangerTonal" size="sm" onPress={() => setStep(1)} style={styles.bannerAction}>
+                      تعديل الموعد
+                    </Button>
+                  ) : undefined
+                }
+              >
+                {(mutation.error as Error).message}
+              </Banner>
+            ) : null}
 
-        {step === 3 ? (
-          <>
-            <View style={styles.sectionTitleWrap}>
-              <View style={styles.sectionBlueLine} />
-              <Text style={styles.sectionTitle}>توزيع الدرجات</Text>
-            </View>
-            <View style={styles.formCard}>
-              {WEIGHT_FIELDS.map((field, index) => (
-                <View key={field.key}>
-                  {index > 0 ? <View style={styles.formDivider} /> : null}
-                  <View style={styles.weightRow}>
-                    <TextInput
-                      style={styles.weightInput}
-                      value={String(weights[field.key])}
+            <View style={styles.group}>
+              <View style={styles.weightsHeader}>
+                <Text variant="label">
+                  توزيع درجات المادة
+                  <Text variant="label" color="danger">
+                    {" *"}
+                  </Text>
+                </Text>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="restore"
+                  onPress={() => {
+                    setWeightsTouched(false);
+                    set("weights", { ...(centerWeightsQuery.data ?? DEFAULT_WEIGHTS) });
+                    clearError("weights");
+                  }}
+                >
+                  الافتراضي
+                </Button>
+              </View>
+              <View style={styles.weightsGrid}>
+                {WEIGHT_FIELDS.map((field) => (
+                  <View key={field.key} style={styles.weightCell}>
+                    <TextField
+                      label={field.label}
+                      icon={field.icon}
+                      value={String(form.weights[field.key])}
                       onChangeText={(text) => updateWeight(field.key, text)}
                       keyboardType="number-pad"
-                      accessibilityLabel={field.label}
+                      selectTextOnFocus
+                      ltr
+                      maxLength={3}
                     />
-                    <Text style={styles.formLabel}>{field.label}</Text>
                   </View>
-                </View>
-              ))}
-              <Text
-                style={[
-                  styles.totalText,
-                  weightsTotal === 100 ? styles.totalOk : styles.totalBad,
-                ]}
-              >
-                المجموع: {weightsTotal} / 100
-              </Text>
+                ))}
+              </View>
+              <WeightsTotal total={weightsTotal} />
+              {errors.weights ? (
+                <Text variant="caption" color="danger">
+                  {errors.weights}
+                </Text>
+              ) : null}
             </View>
 
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryCardTitle}>ملخص الفصل</Text>
-              <SummaryRow label="المادة" value={subjectName.trim()} />
-              <SummaryRow label="النوع" value={selectedClassType?.label ?? "—"} />
-              <SummaryRow label="الوضع" value={MODE_LABELS[mode]} />
-              <SummaryRow
+            <Card>
+              <Text variant="headline" style={styles.summaryTitle}>
+                ملخص الفصل
+              </Text>
+              <InfoRow label="النوع" value={form.track ? CLASS_TRACK_LABELS[form.track] : null} />
+              <InfoRow
                 label="المستوى"
+                value={form.track === "courses" ? "عام — لا يرتبط بمستوى" : selectedLevel?.shortName ?? null}
+              />
+              <InfoRow label="المادة" value={subjectName} />
+              <InfoRow label="طريقة الحضور" value={MODE_LABELS[form.mode]} />
+              <InfoRow
+                label="الموعد"
                 value={
-                  isCourseTrack
-                    ? "عام لجميع المستويات"
-                    : selectedLevel?.shortName || selectedLevel?.fullName || "—"
+                  form.weekday != null && timesValid
+                    ? `كل ${WEEKDAYS[form.weekday]} · ${timeRangeLabel(normalizeTime(form.startTime), normalizeTime(form.endTime))}`
+                    : null
                 }
               />
-              <SummaryRow label="اليوم" value={selectedWeekday?.label ?? "—"} />
-              <SummaryRow label="الوقت" value={`${startTime} – ${endTime}`} />
-              <SummaryRow label="المعلمة" value={teacherName.trim()} last />
-            </View>
+              <InfoRow label="المعلمة" value={form.teacherName.trim()} last />
+            </Card>
+            <Text variant="caption" color="textMuted">
+              تُولَّد حصص هذا الفصل في الجدول تلقائياً كل أسبوع، ويمكن تسجيل اعتذار المعلمة لأي حصة من صفحتها.
+            </Text>
           </>
         ) : null}
+      </View>
+    </Screen>
+  );
+}
 
-        <View style={styles.footer}>
-          {step < 3 ? (
-            <View style={styles.footerTwoButtons}>
-              {step > 1 ? (
-                <Pressable
-                  style={styles.secondaryButton}
-                  onPress={() => setStep((s) => (s - 1) as 1 | 2)}
-                >
-                  <Text style={styles.secondaryButtonText}>السابق</Text>
-                </Pressable>
-              ) : (
-                <View style={{ flex: 1 }} />
-              )}
-              <Pressable
-                style={[
-                  styles.primaryButton,
-                  styles.primaryButtonFlex,
-                  ((step === 1 && !canProceedStep1) || (step === 2 && !canProceedStep2)) &&
-                    styles.primaryButtonDisabled,
-                ]}
-                onPress={handleNext}
-                disabled={
-                  (step === 1 && !canProceedStep1) || (step === 2 && !canProceedStep2)
-                }
-              >
-                <Text style={styles.primaryButtonText}>التالي</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.footerTwoButtons}>
-              <Pressable
-                style={styles.secondaryButton}
-                onPress={() => setStep(2)}
-                disabled={isSaving}
-              >
-                <Text style={styles.secondaryButtonText}>السابق</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.primaryButton,
-                  styles.primaryButtonFlex,
-                  (isSaving || weightsTotal !== 100) && styles.primaryButtonDisabled,
-                ]}
-                onPress={handleCreate}
-                disabled={isSaving || weightsTotal !== 100}
-              >
-                {isSaving ? (
-                  <ActivityIndicator color={addClassTheme.white} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>إنشاء الفصل</Text>
-                )}
-              </Pressable>
-            </View>
-          )}
-        </View>
-      </ScrollView>
-
-      <Modal visible={showSuccessModal} transparent animationType="fade">
-        <Pressable style={styles.modalOverlay} onPress={handleCloseSuccess}>
-          <Pressable style={styles.successModal} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.successIconWrap}>
-              <Text style={styles.successIcon}>✓</Text>
-            </View>
-            <Text style={styles.successTitle}>تم إنشاء الفصل</Text>
-            <Text style={styles.successMessage}>
-              حُفظ الفصل على الخادم مع أول حصة مجدولة. يمكنك فتح تفاصيل الحصة الآن.
-            </Text>
-            <Pressable style={styles.successButton} onPress={handleOpenDraftSession}>
-              <Text style={styles.successButtonText}>فتح تفاصيل الحصة</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.successButton, styles.successSecondary]}
-              onPress={handleCloseSuccess}
-            >
-              <Text style={styles.successSecondaryText}>
-                {classTypeId === "mutor" && levelId
-                  ? "العودة للمستوى"
-                  : "العودة للمستويات"}
-              </Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </SafeAreaView>
+function WeightsTotal({ total }: { total: number }) {
+  const ok = total === 100;
+  const over = total > 100;
+  const tint = ok ? colors.success : over ? colors.danger : colors.warning;
+  return (
+    <View
+      style={styles.totalWrap}
+      accessibilityRole="progressbar"
+      accessibilityLabel={`مجموع الأوزان ${total} من 100`}
+      accessibilityValue={{ min: 0, max: 100, now: Math.min(total, 100) }}
+    >
+      <View style={styles.totalRow}>
+        <Text variant="bodyStrong" style={{ color: tint }}>
+          {ok ? "المجموع مكتمل" : over ? `زيادة ${total - 100}` : `متبقٍ ${100 - total}`}
+        </Text>
+        <Text variant="headline" tabular style={{ color: tint }}>
+          {`${total} / 100`}
+        </Text>
+      </View>
+      <View style={styles.totalTrack}>
+        <View style={[styles.totalFill, { width: `${Math.min(total, 100)}%`, backgroundColor: tint }]} />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: addClassTheme.background,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-    backgroundColor: addClassTheme.white,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-      },
-      android: { elevation: 2 },
-    }),
-  },
-  headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: addClassTheme.headerButtonBg,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerBackIcon: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: addClassTheme.accentBlue,
-  },
-  headerCloseIcon: {
-    fontSize: 18,
-    fontWeight: "500",
-    color: addClassTheme.text,
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: "center",
-    marginHorizontal: spacing.md,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: addClassTheme.text,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: addClassTheme.textSecondary,
-    marginBottom: spacing.sm,
-  },
-  progressBar: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  progressSegment: {
-    width: 28,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: addClassTheme.progressInactive,
-  },
-  progressSegmentCompleted: {
-    backgroundColor: addClassTheme.progressCompleted,
-  },
-  progressSegmentActive: {
-    backgroundColor: addClassTheme.progressActive,
-  },
-  scroll: { flex: 1 },
-  scrollContent: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl * 2,
-  },
-  previewBanner: {
-    backgroundColor: addClassTheme.infoBanner,
-    borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: addClassTheme.selectedBorder,
-  },
-  previewBannerText: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: addClassTheme.text,
-    textAlign: "right",
-  },
-  sectionTitleWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.md,
-    marginTop: spacing.sm,
-  },
-  sectionBlueLine: {
-    width: 4,
-    height: 22,
-    borderRadius: 2,
-    backgroundColor: addClassTheme.accentBlue,
-    marginLeft: spacing.sm,
-  },
-  sectionPurpleLine: {
-    backgroundColor: addClassTheme.accentPurple,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: addClassTheme.text,
-  },
-  formCard: {
-    backgroundColor: addClassTheme.white,
-    borderRadius: 16,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-    gap: spacing.sm,
-  },
-  formField: { gap: spacing.xs },
-  formLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: addClassTheme.text,
-    textAlign: "right",
-  },
-  formInput: {
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-    borderRadius: 12,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: 15,
-    color: addClassTheme.text,
-    textAlign: I18nManager.isRTL ? "right" : "left",
-  },
-  formDivider: {
-    height: 1,
-    backgroundColor: addClassTheme.cardBorder,
-    marginVertical: spacing.sm,
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    justifyContent: "flex-end",
-  },
-  chip: {
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-    borderRadius: 20,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    backgroundColor: addClassTheme.background,
-  },
-  chipSelected: {
-    borderColor: addClassTheme.selectedBorder,
-    backgroundColor: addClassTheme.selectedBg,
-  },
-  chipText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: addClassTheme.text,
-  },
-  chipTextSelected: {
-    color: addClassTheme.accentBlue,
-  },
-  hint: {
-    marginTop: spacing.md,
-    fontSize: 13,
-    color: addClassTheme.textSecondary,
-    lineHeight: 20,
-    textAlign: "right",
-  },
-  weightRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  weightInput: {
-    width: 72,
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-    borderRadius: 12,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    fontSize: 16,
-    fontWeight: "700",
-    color: addClassTheme.accentBlue,
-    textAlign: "center",
-  },
-  totalText: {
-    marginTop: spacing.md,
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  totalOk: { color: "#166534" },
-  totalBad: { color: "#b91c1c" },
-  summaryCard: {
-    marginTop: spacing.lg,
-    backgroundColor: addClassTheme.white,
-    borderRadius: 16,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-  },
-  summaryCardTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: addClassTheme.text,
-    marginBottom: spacing.sm,
-  },
-  footer: { marginTop: spacing.xl },
-  footerTwoButtons: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  primaryButton: {
-    backgroundColor: addClassTheme.primaryDark,
-    paddingVertical: spacing.lg,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  primaryButtonFlex: {
-    flex: 1,
-    minWidth: 0,
-  },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: {
-    color: addClassTheme.white,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    flex: 1,
-    paddingVertical: spacing.lg,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-    backgroundColor: addClassTheme.white,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: addClassTheme.text,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: spacing.xl,
-  },
-  successModal: {
-    width: "100%",
-    maxWidth: 320,
-    backgroundColor: addClassTheme.white,
-    borderRadius: 20,
-    padding: spacing.xl,
-    alignItems: "center",
-  },
-  successIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: addClassTheme.selectedBg,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.lg,
-  },
-  successIcon: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: addClassTheme.selectedBorder,
-  },
-  successTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: addClassTheme.text,
-    marginBottom: spacing.xs,
-  },
-  successMessage: {
-    fontSize: 15,
-    color: addClassTheme.textSecondary,
-    marginBottom: spacing.lg,
-    textAlign: "center",
-  },
-  successButton: {
-    backgroundColor: addClassTheme.primaryDark,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
-    borderRadius: 12,
-    width: "100%",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  successButtonText: {
-    color: addClassTheme.white,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  successSecondary: {
-    backgroundColor: addClassTheme.white,
-    borderWidth: 1,
-    borderColor: addClassTheme.cardBorder,
-  },
-  successSecondaryText: {
-    color: addClassTheme.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
+  flex: { flex: 1 },
+  form: { gap: space[5], marginTop: space[5] },
+  footer: { flexDirection: "row", gap: space[3] },
+  footerBack: { minWidth: 100 },
+  row: { flexDirection: "row", gap: space[3] },
+  group: { gap: space[3] },
+  clashNote: { marginTop: space[1] },
+  bannerAction: { alignSelf: "flex-start", marginTop: space[2] },
+  weightsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  weightsGrid: { flexDirection: "row", flexWrap: "wrap", gap: space[3] },
+  weightCell: { flexBasis: "46%", flexGrow: 1 },
+  totalWrap: { gap: space[2] },
+  totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  totalTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.surfaceSunken, overflow: "hidden" },
+  totalFill: { height: "100%", borderRadius: radius.pill },
+  summaryTitle: { marginBottom: space[1] },
 });

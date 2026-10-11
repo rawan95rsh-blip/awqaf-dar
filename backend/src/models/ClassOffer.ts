@@ -21,7 +21,7 @@ const classOfferSchema = new Schema(
       required: true,
       index: true,
     },
-    /** مطلوب لمطور؛ null للدورة */
+    /** مطلوب للتمهيدي والمطور؛ null للدورة */
     levelId: {
       type: Schema.Types.ObjectId,
       ref: 'Level',

@@ -7,10 +7,12 @@ import {
   submitRegistrationRequest,
 } from '../controllers/registrationRequestsController';
 import { authenticate, authorize } from '../middleware/authenticate';
+import { documentsUpload } from '../middleware/upload';
+import { authWriteRateLimiter } from '../middleware/rateLimit';
 
 const router = Router();
 
-router.post('/', submitRegistrationRequest);
+router.post('/', authWriteRateLimiter, documentsUpload, submitRegistrationRequest);
 
 router.get('/', authenticate, authorize('center_admin'), listRegistrationRequests);
 router.get('/:id', authenticate, authorize('center_admin'), getRegistrationRequest);

@@ -1,63 +1,37 @@
-import { apiClient, getApiErrorMessage, type ApiSuccess } from '@/src/api/client';
-import type { LevelDetail, LevelListItem } from '@/src/types/level';
-import type { StudentListItem } from '@/src/types/student';
+import { apiClient, request, type ApiSuccess } from "@/src/api/client";
+import type { LevelDetail, LevelListItem } from "@/src/types/level";
+import type { StudentListItem } from "@/src/types/student";
+import type { LevelTrack } from "@/src/constants/domain";
 
 export const levelQueryKeys = {
-  list: (centerId: string) => ['levels', centerId] as const,
-  detail: (levelId: string) => ['level', levelId] as const,
-  students: (levelId: string) => ['level-students', levelId] as const,
+  list: (centerId: string) => ["levels", centerId] as const,
+  detail: (levelId: string) => ["level", levelId] as const,
+  students: (levelId: string) => ["level-students", levelId] as const,
 };
 
-export async function fetchLevelsByCenter(centerId: string): Promise<LevelListItem[]> {
-  try {
-    const response = await apiClient.get<ApiSuccess<LevelListItem[]>>('/api/levels', {
-      params: { centerId },
-    });
-    return response.data.data ?? [];
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+export async function fetchLevelsByCenter(centerId: string, track?: LevelTrack): Promise<LevelListItem[]> {
+  return (
+    (await request(() =>
+      apiClient.get<ApiSuccess<LevelListItem[]>>("/api/levels", { params: { centerId, track } })
+    )) ?? []
+  );
 }
 
-export async function fetchLevelById(levelId: string): Promise<LevelDetail> {
-  try {
-    const response = await apiClient.get<ApiSuccess<LevelDetail>>(`/api/levels/${levelId}`);
-    const payload = response.data.data;
-    if (!payload?.id) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return payload;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+export function fetchLevelById(levelId: string): Promise<LevelDetail> {
+  return request(() => apiClient.get<ApiSuccess<LevelDetail>>(`/api/levels/${levelId}`));
 }
 
 export async function fetchLevelStudents(levelId: string): Promise<StudentListItem[]> {
-  try {
-    const response = await apiClient.get<ApiSuccess<StudentListItem[]>>(
-      `/api/levels/${levelId}/students`
-    );
-    return response.data.data ?? [];
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+  return (await request(() => apiClient.get<ApiSuccess<StudentListItem[]>>(`/api/levels/${levelId}/students`))) ?? [];
 }
 
 export type CreateLevelPayload = {
   fullName: string;
   shortName?: string;
   order: number;
+  track: LevelTrack;
 };
 
-export async function createLevel(payload: CreateLevelPayload): Promise<LevelDetail> {
-  try {
-    const response = await apiClient.post<ApiSuccess<LevelDetail>>('/api/levels', payload);
-    const data = response.data.data;
-    if (!data?.id) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return data;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+export function createLevel(payload: CreateLevelPayload): Promise<LevelDetail> {
+  return request(() => apiClient.post<ApiSuccess<LevelDetail>>("/api/levels", payload));
 }

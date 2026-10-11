@@ -8,7 +8,9 @@ import { VerificationCode } from '../models/VerificationCode';
 import { sendError, sendSuccess } from '../utils/response';
 import { signToken } from '../utils/token';
 import type { UserDocument } from '../models/User';
-import { ensureGeneralLevelsForCenter } from '../utils/centerLevels';
+import { ensureDefaultLevelsForCenter } from '../utils/centerLevels';
+import { parsePhoneInput, phoneLookupCandidates } from '../utils/phone';
+import { sendSms } from '../services/smsService';
 import {
   isDigitsOnlyPassword,
   PASSWORD_DIGITS_ERROR_AR,
@@ -21,9 +23,6 @@ import {
 } from '../utils/idNumber';
 import { SUSPENDED_LOGIN_ERROR_AR } from '../constants/enrollment';
 
-function normalizePhone(phone: string): string {
-  return phone.trim().replace(/\s/g, '');
-}
 
 async function buildLoginResponse(user: UserDocument) {
   let centerProfile: { id: string; nameAr: string } | undefined;
@@ -41,7 +40,7 @@ async function buildLoginResponse(user: UserDocument) {
         idNumber: string;
         nationality: string;
         academicLevel: string;
-        levelId: string;
+        levelId: string | null;
       }
     | undefined;
   if (user.studentId) {
@@ -53,7 +52,7 @@ async function buildLoginResponse(user: UserDocument) {
         idNumber: student.idNumber,
         nationality: student.nationality,
         academicLevel: student.academicLevel,
-        levelId: student.levelId.toString(),
+        levelId: student.levelId ? student.levelId.toString() : null,
       };
     }
   }
@@ -89,6 +88,7 @@ const VALID_SPECIALIZATIONS = ['mutor', 'dawa', 'atruja', 'courses', 'siraj'] as
 type RegisterCenterBody = {
   email?: string;
   phone?: string;
+  countryCode?: string;
   password?: string;
   centerName?: string;
   supervisorName?: string;
@@ -97,6 +97,7 @@ type RegisterCenterBody = {
 
 type VerifyCenterBody = {
   phone?: string;
+  countryCode?: string;
   code?: string;
 };
 
@@ -104,22 +105,19 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
   try {
     const {
       phone,
+      countryCode,
       password,
       centerName,
       supervisorName,
       specializations,
     } = req.body as RegisterCenterBody;
 
-    if (!phone || typeof phone !== 'string') {
-      sendError(res, 'رقم الهاتف مطلوب', 400);
+    const parsedPhone = parsePhoneInput(phone, countryCode);
+    if (!parsedPhone.ok) {
+      sendError(res, parsedPhone.error, 400);
       return;
     }
-
-    const normalizedPhone = normalizePhone(phone);
-    if (!/^\d{10}$/.test(normalizedPhone)) {
-      sendError(res, 'رقم الهاتف يجب أن يكون 10 أرقام', 400);
-      return;
-    }
+    const normalizedPhone = parsedPhone.phone;
 
     if (!password || typeof password !== 'string') {
       sendError(res, 'كلمة المرور مطلوبة', 400);
@@ -157,37 +155,57 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const existingUser = await User.findOne({ phone: normalizedPhone });
-    if (existingUser) {
-      sendError(res, 'رقم الهاتف مسجل مسبقاً', 409);
-      return;
-    }
-
     const trimmedCenterName = centerName.trim();
     const trimmedSupervisorName = supervisorName.trim();
     const validSpecs = specializations as string[];
-
-    const center = await Center.create({
-      nameAr: trimmedCenterName,
-      supervisorName: trimmedSupervisorName,
-      specializations: validSpecs,
-      status: 'pending',
-    });
-
     const passwordHash = await bcrypt.hash(password, 10);
     const email =
       typeof req.body.email === 'string' && req.body.email.trim()
         ? req.body.email.trim().toLowerCase()
         : undefined;
 
-    const user = await User.create({
-      phone: normalizedPhone,
-      passwordHash,
-      role: 'center_admin',
-      centerId: center._id,
-      email,
-      isActive: false,
-    });
+    const existingUser = await User.findOne({ phone: normalizedPhone });
+    // تسجيل سابق لم يكتمل التحقق منه — نسمح بإعادة المحاولة بدل حظر الرقم للأبد
+    const canResumePending =
+      existingUser && !existingUser.isActive && existingUser.role === 'center_admin';
+    if (existingUser && !canResumePending) {
+      sendError(res, 'رقم الهاتف مسجل مسبقاً', 409);
+      return;
+    }
+
+    let user;
+    if (canResumePending && existingUser) {
+      await Center.updateOne(
+        { _id: existingUser.centerId },
+        {
+          $set: {
+            nameAr: trimmedCenterName,
+            supervisorName: trimmedSupervisorName,
+            specializations: validSpecs,
+          },
+        }
+      );
+      existingUser.passwordHash = passwordHash;
+      if (email) existingUser.email = email;
+      await existingUser.save();
+      user = existingUser;
+    } else {
+      const center = await Center.create({
+        nameAr: trimmedCenterName,
+        supervisorName: trimmedSupervisorName,
+        specializations: validSpecs,
+        status: 'pending',
+      });
+
+      user = await User.create({
+        phone: normalizedPhone,
+        passwordHash,
+        role: 'center_admin',
+        centerId: center._id,
+        email,
+        isActive: false,
+      });
+    }
 
     await VerificationCode.deleteMany({
       phone: normalizedPhone,
@@ -204,6 +222,8 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
       expiresAt,
       userId: user._id,
     });
+
+    await sendSms(normalizedPhone, `كود تفعيل حساب المركز في تطبيق دور القرآن: ${code}`);
 
     const data: { message: string; phone: string; devCode?: string } = {
       message: 'تم إرسال كود التحقق',
@@ -223,10 +243,11 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
 
 export async function verifyCenter(req: Request, res: Response): Promise<void> {
   try {
-    const { phone, code } = req.body as VerifyCenterBody;
+    const { phone, countryCode, code } = req.body as VerifyCenterBody;
 
-    if (!phone || typeof phone !== 'string') {
-      sendError(res, 'رقم الهاتف مطلوب', 400);
+    const parsedPhone = parsePhoneInput(phone, countryCode);
+    if (!parsedPhone.ok) {
+      sendError(res, parsedPhone.error, 400);
       return;
     }
 
@@ -235,7 +256,7 @@ export async function verifyCenter(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const normalizedPhone = normalizePhone(phone);
+    const normalizedPhone = parsedPhone.phone;
     const user = await User.findOne({ phone: normalizedPhone });
 
     if (!user) {
@@ -266,7 +287,7 @@ export async function verifyCenter(req: Request, res: Response): Promise<void> {
 
     if (user.centerId) {
       await Center.findByIdAndUpdate(user.centerId, { status: 'active' });
-      await ensureGeneralLevelsForCenter(user.centerId);
+      await ensureDefaultLevelsForCenter(user.centerId);
     }
 
     user.isActive = true;
@@ -286,8 +307,9 @@ export async function verifyCenter(req: Request, res: Response): Promise<void> {
 
 export async function login(req: Request, res: Response): Promise<void> {
   try {
-    const { phone, idNumber, password } = req.body as {
+    const { phone, countryCode, idNumber, password } = req.body as {
       phone?: string;
+      countryCode?: string;
       idNumber?: string;
       password?: string;
     };
@@ -301,12 +323,12 @@ export async function login(req: Request, res: Response): Promise<void> {
     const hasIdNumber = typeof idNumber === 'string' && idNumber.trim().length > 0;
 
     if (!hasPhone && !hasIdNumber) {
-      sendError(res, 'رقم الهاتف أو رقم الهوية مطلوب', 400);
+      sendError(res, 'رقم الهاتف أو الرقم المدني مطلوب', 400);
       return;
     }
 
     if (hasPhone && hasIdNumber) {
-      sendError(res, 'أدخل رقم الهاتف أو رقم الهوية فقط', 400);
+      sendError(res, 'استخدمي رقم الهاتف أو الرقم المدني — وليس الاثنين', 400);
       return;
     }
 
@@ -330,7 +352,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           sendError(res, 'طلب التسجيل بانتظار موافقة المركز', 403);
           return;
         }
-        sendError(res, 'رقم الهوية أو كلمة المرور غير صحيحة', 401);
+        sendError(res, 'الرقم المدني أو كلمة المرور غير صحيحة', 401);
         return;
       }
 
@@ -340,7 +362,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       });
 
       if (!user || !user.isActive) {
-        sendError(res, 'رقم الهوية أو كلمة المرور غير صحيحة', 401);
+        sendError(res, 'الرقم المدني أو كلمة المرور غير صحيحة', 401);
         return;
       }
 
@@ -351,7 +373,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
       const passwordMatch = await bcrypt.compare(password, user.passwordHash);
       if (!passwordMatch) {
-        sendError(res, 'رقم الهوية أو كلمة المرور غير صحيحة', 401);
+        sendError(res, 'الرقم المدني أو كلمة المرور غير صحيحة', 401);
         return;
       }
 
@@ -359,8 +381,8 @@ export async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const normalizedPhone = normalizePhone(phone!);
-    const user = await User.findOne({ phone: normalizedPhone });
+    const candidates = phoneLookupCandidates(phone, countryCode);
+    const user = await User.findOne({ phone: { $in: candidates } });
 
     if (!user) {
       sendError(res, 'رقم الهاتف أو كلمة المرور غير صحيحة', 401);
@@ -392,6 +414,52 @@ export async function login(req: Request, res: Response): Promise<void> {
     sendSuccess(res, await buildLoginResponse(user));
   } catch (err) {
     console.error('[login]', err);
+    sendError(res, 'حدث خطأ في الخادم', 500);
+  }
+}
+
+/** إعادة إرسال كود التحقق لمركز لم يُفعَّل بعد */
+export async function resendCenterCode(req: Request, res: Response): Promise<void> {
+  try {
+    const { phone, countryCode } = req.body as VerifyCenterBody;
+    const parsedPhone = parsePhoneInput(phone, countryCode);
+    if (!parsedPhone.ok) {
+      sendError(res, parsedPhone.error, 400);
+      return;
+    }
+    const user = await User.findOne({ phone: parsedPhone.phone, role: 'center_admin' });
+    if (!user || user.isActive) {
+      sendError(res, 'لا يوجد تسجيل بانتظار التحقق لهذا الرقم', 404);
+      return;
+    }
+
+    const recent = await VerificationCode.findOne({
+      phone: parsedPhone.phone,
+      purpose: 'center_registration',
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+    if (recent) {
+      sendError(res, 'انتظري دقيقة قبل طلب كود جديد', 429);
+      return;
+    }
+
+    await VerificationCode.deleteMany({ phone: parsedPhone.phone, purpose: 'center_registration' });
+    const code = generateVerificationCode();
+    await VerificationCode.create({
+      phone: parsedPhone.phone,
+      code,
+      purpose: 'center_registration',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      userId: user._id,
+    });
+    await sendSms(parsedPhone.phone, `كود تفعيل حساب المركز في تطبيق دور القرآن: ${code}`);
+
+    sendSuccess(res, {
+      message: 'تم إرسال كود جديد',
+      ...(process.env.NODE_ENV === 'development' ? { devCode: code } : {}),
+    });
+  } catch (err) {
+    console.error('[resendCenterCode]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
   }
 }

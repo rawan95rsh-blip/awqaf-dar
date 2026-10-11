@@ -5,10 +5,7 @@ import type {
   ListClassOffersParams,
 } from "@/src/types/classOffer";
 import type { LevelListItem } from "@/src/types/level";
-import {
-  MUTOR_LEVEL_ORDER_MAX,
-  MUTOR_LEVEL_ORDER_MIN,
-} from "@/src/types/classOffer";
+import type { LevelTrack } from "@/src/constants/domain";
 
 export const classOffersQueryKeys = {
   all: ["class-offers"] as const,
@@ -17,16 +14,11 @@ export const classOffersQueryKeys = {
   detail: (id: string) => ["class-offers", "detail", id] as const,
 };
 
-export function isMutorLevel(level: Pick<LevelListItem, "order">): boolean {
-  return (
-    level.order >= MUTOR_LEVEL_ORDER_MIN && level.order <= MUTOR_LEVEL_ORDER_MAX
-  );
-}
-
-export function filterMutorLevels<T extends Pick<LevelListItem, "order">>(
-  levels: T[]
+export function levelsOfTrack<T extends Pick<LevelListItem, "track" | "order">>(
+  levels: T[],
+  track: LevelTrack
 ): T[] {
-  return levels.filter(isMutorLevel);
+  return levels.filter((level) => level.track === track).sort((a, b) => a.order - b.order);
 }
 
 export async function listClassOffers(

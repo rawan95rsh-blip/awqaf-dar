@@ -1,20 +1,18 @@
-export const CLASS_TRACKS = ['mutor', 'courses'] as const;
+import { centerDateParts, zonedDateTimeToUtc } from '../utils/timezone';
+
+/** نوع الفصل: تمهيدي / مطور مرتبطان بمستوى، والدورة عامة */
+export const CLASS_TRACKS = ['preparatory', 'mutor', 'courses'] as const;
 export type ClassTrack = (typeof CLASS_TRACKS)[number];
 
-export function isClassTrack(value: string): value is ClassTrack {
-  return (CLASS_TRACKS as readonly string[]).includes(value);
+export function isClassTrack(value: unknown): value is ClassTrack {
+  return typeof value === 'string' && (CLASS_TRACKS as readonly string[]).includes(value);
 }
 
-export const MUTOR_LEVEL_ORDER_MIN = 1;
-export const MUTOR_LEVEL_ORDER_MAX = 8;
-
-export function isMutorLevelOrder(order: number): boolean {
-  return (
-    Number.isInteger(order) &&
-    order >= MUTOR_LEVEL_ORDER_MIN &&
-    order <= MUTOR_LEVEL_ORDER_MAX
-  );
-}
+export const CLASS_TRACK_LABELS_AR: Record<ClassTrack, string> = {
+  preparatory: 'تمهيدي',
+  mutor: 'مطور',
+  courses: 'دورة',
+};
 
 export const WEEKDAY_LABELS_AR = [
   'الأحد',
@@ -26,9 +24,9 @@ export const WEEKDAY_LABELS_AR = [
   'السبت',
 ] as const;
 
-export function parseTimeHHMM(
-  value: unknown
-): { hours: number; minutes: number; formatted: string } | null {
+export type TimeOfDay = { hours: number; minutes: number; formatted: string };
+
+export function parseTimeHHMM(value: unknown): TimeOfDay | null {
   if (typeof value !== 'string') return null;
   const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
   if (!match) return null;
@@ -42,25 +40,27 @@ export function parseTimeHHMM(
   };
 }
 
-/** أقرب وقوع قادم ليوم الأسبوع والوقت */
+export function minutesOf(time: { hours: number; minutes: number }): number {
+  return time.hours * 60 + time.minutes;
+}
+
+/**
+ * أقرب وقوع قادم ليوم الأسبوع والوقت — محسوب بتوقيت المركز (الكويت)
+ * وليس بتوقيت الخادم، حتى لا تنزاح الحصص ٣ ساعات على خوادم UTC.
+ */
 export function nextOccurrence(
   weekday: number,
   start: { hours: number; minutes: number },
-  end: { hours: number; minutes: number }
+  end: { hours: number; minutes: number },
+  now = new Date()
 ): { startAt: Date; endAt: Date } {
-  const now = new Date();
-  const startAt = new Date(now);
-  const dayDiff = (weekday - now.getDay() + 7) % 7;
-  startAt.setDate(now.getDate() + dayDiff);
-  startAt.setHours(start.hours, start.minutes, 0, 0);
+  const today = centerDateParts(now);
+  const dayDiff = (weekday - today.weekday + 7) % 7;
+  let startAt = zonedDateTimeToUtc(today.year, today.month, today.day + dayDiff, start.hours, start.minutes);
   if (startAt.getTime() <= now.getTime()) {
-    startAt.setDate(startAt.getDate() + 7);
+    startAt = new Date(startAt.getTime() + 7 * 24 * 60 * 60 * 1000);
   }
-
-  const endAt = new Date(startAt);
-  endAt.setHours(end.hours, end.minutes, 0, 0);
-  if (endAt.getTime() <= startAt.getTime()) {
-    endAt.setDate(endAt.getDate() + 1);
-  }
+  const durationMinutes = (minutesOf(end) - minutesOf(start) + 24 * 60) % (24 * 60) || 60;
+  const endAt = new Date(startAt.getTime() + durationMinutes * 60 * 1000);
   return { startAt, endAt };
 }

@@ -1,73 +1,56 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  I18nManager,
-  ActivityIndicator,
-  TextInput,
-  Alert,
-} from "react-native";
+import { useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { centerColors, spacing } from "@/constants";
-import { goBack } from "@/src/utils/navigation";
-import { openZoomUrl } from "@/src/utils/openZoomUrl";
+import { colors, radius, space } from "@/src/theme";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  ErrorState,
+  Header,
+  InfoRow,
+  LoadingState,
+  PromptSheet,
+  Screen,
+  Section,
+  Skeleton,
+  Text,
+  useToast,
+} from "@/src/ui";
+import ZoomLinkSheet from "@/src/components/levels/ZoomLinkSheet";
+import { WEIGHT_FIELDS } from "@/src/components/levels/helpers";
+import { cancelSession, getSession, sessionsQueryKeys, updateSession } from "@/src/api/sessions";
+import { classOffersQueryKeys, getClassOffer } from "@/src/api/classOffers";
 import { formatAttendanceDate } from "@/src/api/attendance";
-import {
-  cancelSession,
-  getSession,
-  sessionsQueryKeys,
-} from "@/src/api/sessions";
-import { getClassOffer, classOffersQueryKeys } from "@/src/api/classOffers";
-import {
-  SESSION_MODE_LABELS,
-  SESSION_STATUS_LABELS,
-} from "@/src/types/session";
+import { SUBJECT_ICONS } from "@/src/constants/domain";
+import { SESSION_MODE_LABELS, SESSION_STATUS_LABELS, type SessionStatus } from "@/src/types/session";
 import { TRACK_LABELS } from "@/src/types/classOffer";
+import { formatDateLong, formatDateTime, formatTime, formatWeekday } from "@/src/utils/format";
+import { openZoomUrl } from "@/src/utils/openZoomUrl";
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
-    </View>
-  );
-}
+const STATUS_TONES: Record<SessionStatus, "primary" | "danger" | "success"> = {
+  scheduled: "primary",
+  cancelled: "danger",
+  completed: "success",
+};
 
-function formatDateTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("ar-SA", {
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      day: "numeric",
-      month: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-export default function SessionDetailScreen() {
+export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const sessionId = id ?? "";
-  const [cancelReason, setCancelReason] = useState("");
-  const [showCancelForm, setShowCancelForm] = useState(false);
+  const router = useRouter();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
 
   const sessionQuery = useQuery({
     queryKey: sessionsQueryKeys.detail(sessionId),
     queryFn: () => getSession(sessionId),
     enabled: !!sessionId,
   });
-
   const session = sessionQuery.data;
   const classOfferId = session?.classOfferId ?? "";
 
@@ -76,521 +59,252 @@ export default function SessionDetailScreen() {
     queryFn: () => getClassOffer(classOfferId),
     enabled: !!classOfferId,
   });
+  const offer = offerQuery.data;
+
+  const refreshSessions = () => {
+    void queryClient.invalidateQueries({ queryKey: sessionsQueryKeys.all });
+  };
 
   const cancelMutation = useMutation({
     mutationFn: (reason: string) => cancelSession(sessionId, reason),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: sessionsQueryKeys.detail(sessionId) });
-      queryClient.invalidateQueries({ queryKey: sessionsQueryKeys.all });
-      setShowCancelForm(false);
-      setCancelReason("");
-      Alert.alert("تم", result.message ?? "تم إلغاء الحصة");
+      queryClient.setQueryData(sessionsQueryKeys.detail(sessionId), result);
+      refreshSessions();
+      setCancelOpen(false);
+      toast.success(result.message ?? "تم تسجيل اعتذار المعلمة وإلغاء الحصة");
     },
-    onError: (err: Error) => {
-      Alert.alert("خطأ", err.message);
-    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
-  const offer = offerQuery.data;
+  const zoomMutation = useMutation({
+    mutationFn: (zoomUrl: string) => updateSession(sessionId, { zoomUrl }),
+    onSuccess: (result) => {
+      queryClient.setQueryData(sessionsQueryKeys.detail(sessionId), result);
+      refreshSessions();
+      setZoomOpen(false);
+      toast.success("تم حفظ رابط Zoom");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
-  const backHref =
-    offer?.track === "mutor" && offer.levelId
-      ? (`/main/level/${offer.levelId}` as Href)
-      : ("/main/classes" as Href);
+  const backHref = (session?.levelId ? `/main/level/${session.levelId}` : "/main/classes") as Href;
+  const header = <Header back={backHref} title="تفاصيل الحصة" />;
 
-  const hasZoom = Boolean(session?.zoomUrl?.trim());
-  const canOpenAttendanceSheet = Boolean(session?.levelId);
-  const canCancel = session?.status === "scheduled";
+  if (sessionQuery.isLoading) {
+    return (
+      <Screen header={header}>
+        <LoadingState label="جاري تحميل الحصة…" />
+      </Screen>
+    );
+  }
 
-  const openAttendanceSheet = () => {
-    if (!session?.levelId) return;
-    const sheetDate = formatAttendanceDate(new Date(session.startAt));
+  if (sessionQuery.isError || !session) {
+    return (
+      <Screen header={header}>
+        <ErrorState
+          message={(sessionQuery.error as Error | null)?.message ?? "الحصة غير موجودة"}
+          onRetry={() => sessionQuery.refetch()}
+        />
+      </Screen>
+    );
+  }
+
+  const isScheduled = session.status === "scheduled";
+  const isCancelled = session.status === "cancelled";
+  const zoomUrl = session.zoomUrl?.trim();
+  const levelLabel = offer
+    ? offer.track === "courses"
+      ? "دورة عامة لجميع المستويات"
+      : offer.levelLabel
+    : null;
+
+  const openAttendance = () => {
+    if (!session.levelId) return;
+    const date = formatAttendanceDate(new Date(session.startAt));
     const returnTo = encodeURIComponent(`/main/session/${sessionId}`);
-    router.push(
-      `/main/attendance/${session.levelId}/${session.subjectIndex}?date=${sheetDate}&returnTo=${returnTo}` as Href
-    );
-  };
-
-  const submitCancel = () => {
-    const reason = cancelReason.trim();
-    if (reason.length < 3) {
-      Alert.alert("تنبيه", "اكتبي سبب الاعتذار (3 أحرف على الأقل)");
-      return;
-    }
-    Alert.alert(
-      "تأكيد الاعتذار",
-      "سيتم إلغاء الحصة. إشعار الطالبات يُفعَّل لاحقاً.",
-      [
-        { text: "رجوع", style: "cancel" },
-        {
-          text: "تأكيد الإلغاء",
-          style: "destructive",
-          onPress: () => cancelMutation.mutate(reason),
-        },
-      ]
-    );
+    router.push(`/main/attendance/${session.levelId}/${session.subjectIndex}?date=${date}&returnTo=${returnTo}` as Href);
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <ScrollView
-        style={styles.main}
-        contentContainerStyle={styles.mainContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View
-          style={[
-            styles.topBar,
-            { justifyContent: I18nManager.isRTL ? "flex-end" : "flex-start" },
-          ]}
-        >
-          <Pressable style={styles.backButton} onPress={() => goBack(router, backHref)}>
+    <Screen
+      header={header}
+      refreshing={sessionQuery.isRefetching}
+      onRefresh={() => {
+        void sessionQuery.refetch();
+        if (classOfferId) void offerQuery.refetch();
+      }}
+    >
+      <Card elevated style={styles.hero}>
+        <View style={styles.heroTop}>
+          <View style={[styles.heroIcon, isCancelled && styles.heroIconMuted]}>
             <MaterialCommunityIcons
-              name={I18nManager.isRTL ? "chevron-right" : "chevron-left"}
-              size={24}
-              color={centerColors.text}
+              name={SUBJECT_ICONS[session.subjectIndex] ?? "book-outline"}
+              size={26}
+              color={isCancelled ? colors.textMuted : colors.onPrimary}
             />
-            <Text style={styles.backButtonText}>رجوع</Text>
-          </Pressable>
-        </View>
-
-        {sessionQuery.isLoading ? (
-          <ActivityIndicator size="large" color={centerColors.accent} />
-        ) : sessionQuery.isError || !session ? (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>تعذر تحميل الحصة</Text>
-            <Text style={styles.emptyBody}>
-              {sessionQuery.error instanceof Error
-                ? sessionQuery.error.message
-                : "الحصة غير موجودة"}
+          </View>
+          <View style={styles.flex}>
+            <Text variant="title" numberOfLines={2} style={isCancelled ? styles.strike : undefined}>
+              {session.title}
+            </Text>
+            <Text variant="caption" color="textSecondary">
+              {`${formatWeekday(session.startAt)} ${formatDateLong(session.startAt)}`}
             </Text>
           </View>
-        ) : (
-          <>
-            <Text style={styles.title}>{session.title}</Text>
-            <Text
-              style={[
-                styles.subtitle,
-                session.status === "cancelled" && styles.subtitleCancelled,
-              ]}
-            >
-              {SESSION_STATUS_LABELS[session.status]}
+        </View>
+        <View style={styles.heroMeta}>
+          <Badge label={SESSION_STATUS_LABELS[session.status]} tone={STATUS_TONES[session.status]} />
+          <Badge
+            label={`${formatTime(session.startAt)} – ${formatTime(session.endAt)}`}
+            icon="clock-outline"
+            tone="neutral"
+          />
+          <Badge
+            label={SESSION_MODE_LABELS[session.mode]}
+            icon={session.mode === "in_person" ? "map-marker-outline" : "video-outline"}
+            tone="neutral"
+          />
+        </View>
+      </Card>
+
+      {isCancelled ? (
+        <View style={styles.block}>
+          <Banner tone="danger" icon="calendar-remove" title="اعتذار المعلمة — الحصة ملغاة">
+            <Text variant="body" color="danger">
+              {session.cancelReason?.trim() || "لم يُذكر سبب"}
             </Text>
+            {session.cancelledAt ? (
+              <Text variant="micro" color="danger">
+                {`سُجّل الاعتذار ${formatDateTime(session.cancelledAt)}`}
+              </Text>
+            ) : null}
+          </Banner>
+        </View>
+      ) : null}
 
-            {session.status === "cancelled" ? (
-              <View style={styles.cancelBanner}>
-                <MaterialCommunityIcons
-                  name="calendar-remove"
-                  size={22}
-                  color={centerColors.accentRed}
-                />
-                <View style={styles.cancelBannerText}>
-                  <Text style={styles.cancelBannerTitle}>
-                    اعتذار المعلمة — الحصة ملغاة
+      {isScheduled ? (
+        <View style={styles.actions}>
+          {session.levelId ? (
+            <Button icon="clipboard-check-outline" size="lg" fullWidth onPress={openAttendance}>
+              كشف التحضير
+            </Button>
+          ) : null}
+          {zoomUrl ? (
+            <Button icon="video" variant="accent" fullWidth onPress={() => void openZoomUrl(zoomUrl)}>
+              الانضمام عبر Zoom
+            </Button>
+          ) : null}
+          <Button icon="calendar-remove" variant="dangerTonal" fullWidth onPress={() => setCancelOpen(true)}>
+            اعتذار المعلمة عن الحصة
+          </Button>
+          <Button
+            icon={zoomUrl ? "link-edit" : "link-plus"}
+            variant="ghost"
+            size="sm"
+            onPress={() => setZoomOpen(true)}
+            style={styles.zoomLink}
+          >
+            {zoomUrl ? "تعديل رابط Zoom" : "إضافة رابط Zoom"}
+          </Button>
+          {!session.levelId ? (
+            <Text variant="caption" color="textMuted">
+              هذه الحصة لدورة عامة غير مرتبطة بمستوى، لذلك لا يتوفر لها كشف تحضير.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Section title="بيانات الحصة">
+        <Card padding={4}>
+          <InfoRow label="النوع" icon="shape-outline" value={offer ? TRACK_LABELS[offer.track] : offerQuery.isLoading ? "…" : null} />
+          <InfoRow label="المستوى" icon="layers-outline" value={levelLabel ?? (offerQuery.isLoading ? "…" : null)} />
+          <InfoRow label="طريقة الحضور" icon="map-marker-outline" value={SESSION_MODE_LABELS[session.mode]} />
+          <InfoRow label="البداية" icon="clock-start" value={formatDateTime(session.startAt)} />
+          <InfoRow label="النهاية" icon="clock-end" value={formatDateTime(session.endAt)} />
+          <InfoRow label="المعلمة" icon="account-tie-outline" value={session.teacherName} last />
+        </Card>
+      </Section>
+
+      {classOfferId ? (
+        <Section title="توزيع الدرجات" subtitle="حسب إعداد الفصل (المجموع 100)">
+          {offerQuery.isLoading ? (
+            <Skeleton height={76} radiusSize={radius.lg} />
+          ) : offerQuery.isError || !offer ? (
+            <ErrorState compact message={(offerQuery.error as Error | null)?.message} onRetry={() => offerQuery.refetch()} />
+          ) : (
+            <View style={styles.weights}>
+              {WEIGHT_FIELDS.map((field) => (
+                <View key={field.key} style={styles.weight}>
+                  <MaterialCommunityIcons name={field.icon} size={18} color={colors.primary} />
+                  <Text variant="headline" tabular>
+                    {String(offer.gradeWeights[field.key])}
                   </Text>
-                  <Text style={styles.cancelBannerReason}>
-                    {session.cancelReason ?? "—"}
+                  <Text variant="micro" color="textSecondary" numberOfLines={1}>
+                    {field.short}
                   </Text>
-                  {session.cancelledAt ? (
-                    <Text style={styles.cancelBannerMeta}>
-                      {formatDateTime(session.cancelledAt)}
-                    </Text>
-                  ) : null}
                 </View>
-              </View>
-            ) : null}
-
-            <View style={styles.card}>
-              <InfoRow
-                label="النوع"
-                value={offer ? TRACK_LABELS[offer.track] : "—"}
-              />
-              <InfoRow
-                label="المستوى"
-                value={
-                  offer?.track === "courses"
-                    ? "عام لجميع المستويات"
-                    : offer?.levelLabel ?? "—"
-                }
-              />
-              <InfoRow label="الوضع" value={SESSION_MODE_LABELS[session.mode]} />
-              <InfoRow label="البداية" value={formatDateTime(session.startAt)} />
-              <InfoRow label="النهاية" value={formatDateTime(session.endAt)} />
-              <InfoRow label="المعلمة" value={session.teacherName ?? "—"} />
+              ))}
             </View>
+          )}
+        </Section>
+      ) : null}
 
-            {offer ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>توزيع الدرجات (من الفصل)</Text>
-                <InfoRow label="الحضور" value={`${offer.gradeWeights.attendance}%`} />
-                <InfoRow
-                  label="اختبار قصير"
-                  value={`${offer.gradeWeights.shortExam}%`}
-                />
-                <InfoRow
-                  label="المشاركة"
-                  value={`${offer.gradeWeights.participation}%`}
-                />
-                <InfoRow label="النهائي" value={`${offer.gradeWeights.final}%`} />
-              </View>
-            ) : null}
+      <PromptSheet
+        visible={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        title="اعتذار المعلمة عن الحصة"
+        message={
+          session.levelId
+            ? `ستُلغى حصة «${session.title}» ويصل إشعار بالاعتذار وسببه لطالبات المستوى.`
+            : `ستُلغى حصة «${session.title}» ويُسجَّل سبب الاعتذار.`
+        }
+        inputLabel="سبب الاعتذار"
+        placeholder="مثال: ظرف صحي طارئ للمعلمة"
+        confirmLabel="تأكيد الاعتذار وإلغاء الحصة"
+        confirmVariant="danger"
+        minLength={3}
+        loading={cancelMutation.isPending}
+        onConfirm={(reason) => cancelMutation.mutate(reason)}
+      />
 
-            {session.status !== "cancelled" ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Zoom</Text>
-                {hasZoom ? (
-                  <>
-                    <Text style={styles.zoomHint} numberOfLines={2}>
-                      {session.zoomUrl}
-                    </Text>
-                    <Pressable
-                      style={styles.zoomButton}
-                      onPress={() => openZoomUrl(session.zoomUrl)}
-                      accessibilityRole="button"
-                      accessibilityLabel="انضمام عبر Zoom"
-                    >
-                      <MaterialCommunityIcons
-                        name="video"
-                        size={20}
-                        color={centerColors.textOnAccent}
-                      />
-                      <Text style={styles.zoomButtonText}>انضمام عبر Zoom</Text>
-                    </Pressable>
-                  </>
-                ) : (
-                  <Text style={styles.noZoomText}>لا يوجد رابط Zoom لهذه الحصة</Text>
-                )}
-              </View>
-            ) : null}
-
-            {session.status !== "cancelled" ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>كشف التحضير</Text>
-                <Text style={styles.attendanceHint}>
-                  سجّلي حضور وغياب الطالبات عبر كشف التحضير المعتمد (نفس شاشة
-                  المادة).
-                </Text>
-                {canOpenAttendanceSheet ? (
-                  <Pressable
-                    style={styles.attendanceButton}
-                    onPress={openAttendanceSheet}
-                    accessibilityRole="button"
-                    accessibilityLabel="فتح كشف تحضير الغياب"
-                  >
-                    <MaterialCommunityIcons
-                      name="clipboard-check-outline"
-                      size={20}
-                      color={centerColors.textOnAccent}
-                    />
-                    <Text style={styles.attendanceButtonText}>كشف تحضير الغياب</Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.noZoomText}>
-                    هذه الحصة غير مرتبطة بمستوى — استخدمي كشف التحضير من شاشة
-                    المادة.
-                  </Text>
-                )}
-              </View>
-            ) : null}
-
-            {canCancel ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>اعتذار المعلمة عن الحصة</Text>
-                <Text style={styles.attendanceHint}>
-                  يلغي الحصة ويُسجّل السبب. إشعار طالبات المستوى في يوم الإشعارات.
-                </Text>
-                {!showCancelForm ? (
-                  <Pressable
-                    style={styles.cancelButton}
-                    onPress={() => setShowCancelForm(true)}
-                    accessibilityRole="button"
-                    accessibilityLabel="اعتذار عن الحصة"
-                  >
-                    <MaterialCommunityIcons
-                      name="calendar-remove"
-                      size={20}
-                      color={centerColors.textOnAccent}
-                    />
-                    <Text style={styles.cancelButtonText}>اعتذار عن الحصة</Text>
-                  </Pressable>
-                ) : (
-                  <View style={styles.cancelForm}>
-                    <TextInput
-                      style={styles.cancelInput}
-                      placeholder="سبب الاعتذار..."
-                      placeholderTextColor={centerColors.textSecondary}
-                      value={cancelReason}
-                      onChangeText={setCancelReason}
-                      multiline
-                      textAlignVertical="top"
-                    />
-                    <View style={styles.cancelFormActions}>
-                      <Pressable
-                        style={styles.cancelSecondaryBtn}
-                        onPress={() => {
-                          setShowCancelForm(false);
-                          setCancelReason("");
-                        }}
-                        disabled={cancelMutation.isPending}
-                      >
-                        <Text style={styles.cancelSecondaryBtnText}>إلغاء</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.cancelConfirmBtn}
-                        onPress={submitCancel}
-                        disabled={cancelMutation.isPending}
-                      >
-                        {cancelMutation.isPending ? (
-                          <ActivityIndicator color={centerColors.textOnAccent} />
-                        ) : (
-                          <Text style={styles.cancelButtonText}>تأكيد الإلغاء</Text>
-                        )}
-                      </Pressable>
-                    </View>
-                  </View>
-                )}
-              </View>
-            ) : null}
-
-            <View style={styles.cardMuted}>
-              <Text style={styles.mutedTitle}>قريباً</Text>
-              <Text style={styles.mutedLine}>• رفع ملحقات الحصة</Text>
-              <Text style={styles.mutedLine}>• إشعار اعتذار المعلمة للطالبات</Text>
-            </View>
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+      <ZoomLinkSheet
+        visible={zoomOpen}
+        initialUrl={zoomUrl}
+        loading={zoomMutation.isPending}
+        onClose={() => setZoomOpen(false)}
+        onSave={(url) => zoomMutation.mutate(url)}
+      />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: centerColors.background },
-  main: { flex: 1 },
-  mainContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  backButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: centerColors.text,
-    fontWeight: "600",
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: centerColors.accent,
-    fontWeight: "600",
-    marginBottom: spacing.lg,
-  },
-  subtitleCancelled: {
-    color: centerColors.accentRed,
-  },
-  cancelBanner: {
-    flexDirection: "row",
-    gap: spacing.md,
-    backgroundColor: "rgba(239,68,68,0.1)",
-    borderRadius: 14,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.25)",
-    marginBottom: spacing.md,
-  },
-  cancelBannerText: { flex: 1, gap: 4 },
-  cancelBannerTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: centerColors.accentRed,
-    textAlign: "right",
-  },
-  cancelBannerReason: {
-    fontSize: 14,
-    color: centerColors.text,
-    lineHeight: 22,
-    textAlign: "right",
-  },
-  cancelBannerMeta: {
-    fontSize: 12,
-    color: centerColors.textSecondary,
-    textAlign: "right",
-  },
-  card: {
-    backgroundColor: centerColors.cardBg,
-    borderRadius: 14,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    marginBottom: spacing.md,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.sm,
-  },
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: centerColors.cardBorder,
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-  },
-  infoValue: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: centerColors.text,
-    maxWidth: "60%",
-    textAlign: "left",
-  },
-  zoomHint: {
-    fontSize: 12,
-    color: centerColors.textSecondary,
-    marginBottom: spacing.md,
-    textAlign: "left",
-  },
-  zoomButton: {
-    flexDirection: "row",
+  flex: { flex: 1 },
+  hero: { gap: space[4] },
+  heroTop: { flexDirection: "row", alignItems: "center", gap: space[3] },
+  heroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.sm,
-    backgroundColor: centerColors.accent,
-    borderRadius: 12,
-    paddingVertical: spacing.md,
   },
-  zoomButtonText: {
-    color: centerColors.textOnAccent,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  noZoomText: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    textAlign: "right",
-  },
-  attendanceHint: {
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    lineHeight: 20,
-    marginBottom: spacing.md,
-    textAlign: "right",
-  },
-  attendanceButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    backgroundColor: centerColors.primaryButton,
-    borderRadius: 12,
-    paddingVertical: spacing.md,
-  },
-  attendanceButtonText: {
-    color: centerColors.primaryButtonText,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  cancelButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    backgroundColor: centerColors.accentRed,
-    borderRadius: 12,
-    paddingVertical: spacing.md,
-  },
-  cancelButtonText: {
-    color: centerColors.textOnAccent,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  cancelForm: { gap: spacing.md },
-  cancelInput: {
-    minHeight: 88,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 12,
-    padding: spacing.md,
-    fontSize: 15,
-    color: centerColors.text,
-    backgroundColor: centerColors.background,
-    textAlign: "right",
-  },
-  cancelFormActions: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  cancelSecondaryBtn: {
+  heroIconMuted: { backgroundColor: colors.surfaceSunken },
+  heroMeta: { flexDirection: "row", flexWrap: "wrap", gap: space[2] },
+  strike: { textDecorationLine: "line-through", color: colors.textSecondary },
+  block: { marginTop: space[4] },
+  actions: { marginTop: space[4], gap: space[3] },
+  zoomLink: { alignSelf: "flex-start" },
+  weights: { flexDirection: "row", gap: space[2] },
+  weight: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    paddingVertical: spacing.md,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-  },
-  cancelSecondaryBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: centerColors.textSecondary,
-  },
-  cancelConfirmBtn: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    paddingVertical: spacing.md,
-    backgroundColor: centerColors.accentRed,
-  },
-  cardMuted: {
-    backgroundColor: centerColors.surfaceMuted,
-    borderRadius: 14,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-  },
-  mutedTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.sm,
-  },
-  mutedLine: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    marginBottom: spacing.xs,
-    textAlign: "right",
-  },
-  emptyBox: {
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    gap: spacing.sm,
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: centerColors.text,
-  },
-  emptyBody: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-    lineHeight: 22,
+    gap: 2,
+    paddingVertical: space[3],
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
   },
 });

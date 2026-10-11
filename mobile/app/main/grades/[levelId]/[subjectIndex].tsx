@@ -1,680 +1,374 @@
-import { useEffect, useMemo, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  TextInput,
-  ScrollView,
-  Modal,
-  I18nManager,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { useLocalSearchParams, type Href } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { centerColors, spacing } from "@/constants";
+import { colors, layout, space } from "@/src/theme";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  Header,
+  IconButton,
+  Screen,
+  SearchBar,
+  SkeletonList,
+  Text,
+  useToast,
+} from "@/src/ui";
+import GradeRow from "@/src/components/levels/GradeRow";
+import GradeEditorSheet from "@/src/components/levels/GradeEditorSheet";
+import { DEFAULT_WEIGHTS, WEIGHT_FIELDS, gradeLabel, gradeTone } from "@/src/components/levels/helpers";
+import { useUnsavedChangesGuard } from "@/src/components/levels/useUnsavedChangesGuard";
 import { fetchLevelById, fetchLevelStudents, levelQueryKeys } from "@/src/api/levels";
 import { fetchGrades, gradesQueryKeys, saveGradesBulk } from "@/src/api/grades";
-import { getSubjectName } from "@/src/constants/subjects";
-import { goBack } from "@/src/utils/navigation";
-import {
-  GRADE_WEIGHTS,
-  clampGradeValue,
-  getGradeLabelInfo,
-} from "@/src/constants/grades";
-import { exportRowsToExcel } from "@/src/utils/exportExcel";
+import { fetchGradeWeights, settingsQueryKeys } from "@/src/api/settings";
+import { studentQueryKeys } from "@/src/api/students";
+import { SUBJECT_NAMES, subjectName } from "@/src/constants/domain";
+import type { GradeBreakdown } from "@/src/types/grades";
+import { useAuth } from "@/src/context/AuthContext";
+import { exportWorkbook } from "@/src/utils/excel";
 
-function parseNum(val: string, max: number): number {
-  const n = parseInt(val, 10);
-  return clampGradeValue(isNaN(n) ? 0 : n, max);
+type BreakdownMap = Record<string, GradeBreakdown>;
+type Filter = "all" | "missing" | "changed";
+
+const EMPTY: GradeBreakdown = { attendance: 0, shortExam: 0, participation: 0, final: 0 };
+
+function totalOf(b: GradeBreakdown): number {
+  return b.attendance + b.shortExam + b.participation + b.final;
 }
 
-function GradeInput({
-  label,
-  value,
-  onChange,
-  max,
-  fullWidth,
-}: {
-  label: string;
-  value: number;
-  onChange?: (n: number) => void;
-  max: number;
-  fullWidth?: boolean;
-}) {
-  const strVal = String(value);
-  const handleChange = (text: string) => {
-    onChange?.(parseNum(text, max));
-  };
-  const inc = () => onChange?.(clampGradeValue(value + 1, max));
-  const dec = () => onChange?.(clampGradeValue(value - 1, max));
-
-  return (
-    <View style={[styles.inputGroup, fullWidth && styles.inputGroupFullWidth]}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <View style={styles.inputRow}>
-        <View style={styles.spinnerButtons}>
-          <Pressable style={styles.spinnerBtn} onPress={inc}>
-            <MaterialCommunityIcons name="chevron-up" size={18} color={centerColors.text} />
-          </Pressable>
-          <Pressable style={styles.spinnerBtn} onPress={dec}>
-            <MaterialCommunityIcons name="chevron-down" size={18} color={centerColors.text} />
-          </Pressable>
-        </View>
-        <TextInput
-          style={styles.input}
-          value={strVal}
-          onChangeText={handleChange}
-          keyboardType="numeric"
-          textAlign="right"
-        />
-      </View>
-    </View>
-  );
+function sameBreakdown(a?: GradeBreakdown, b?: GradeBreakdown): boolean {
+  if (!a || !b) return a === b;
+  return WEIGHT_FIELDS.every((f) => a[f.key] === b[f.key]);
 }
 
+/** سجل درجات مادة في مستوى — رصد سريع لكل الطالبات ثم حفظ واحد */
 export default function GradesScreen() {
-  const { levelId, subjectIndex } = useLocalSearchParams<{
-    levelId: string;
-    subjectIndex: string;
-  }>();
-  const router = useRouter();
+  const params = useLocalSearchParams<{ levelId: string; subjectIndex: string }>();
+  const levelId = params.levelId ?? "";
+  const parsed = Number.parseInt(params.subjectIndex ?? "0", 10);
+  const subjectIdx = Number.isInteger(parsed) && parsed >= 0 && parsed < SUBJECT_NAMES.length ? parsed : 0;
+  const name = subjectName(subjectIdx);
+
+  const toast = useToast();
   const queryClient = useQueryClient();
-  const resolvedLevelId = levelId ?? "";
-  const subjectIdx = parseInt(subjectIndex ?? "0", 10);
-  const subjectName = getSubjectName(subjectIdx);
-
-  const [attendance, setAttendance] = useState(0);
-  const [shortExam, setShortExam] = useState(0);
-  const [participation, setParticipation] = useState(0);
-  const [finalScore, setFinalScore] = useState(0);
-  const [selectedStudent, setSelectedStudent] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-  const [studentDropdownVisible, setStudentDropdownVisible] = useState(false);
-
-  const { data: level, isLoading: levelLoading } = useQuery({
-    queryKey: levelQueryKeys.detail(resolvedLevelId),
-    queryFn: () => fetchLevelById(resolvedLevelId),
-    enabled: !!resolvedLevelId,
-  });
-
-  const { data: students = [], isLoading: studentsLoading } = useQuery({
-    queryKey: levelQueryKeys.students(resolvedLevelId),
-    queryFn: () => fetchLevelStudents(resolvedLevelId),
-    enabled: !!resolvedLevelId,
-  });
-
-  const { data: gradesSheet, isLoading: gradesLoading } = useQuery({
-    queryKey: gradesQueryKeys.sheet(resolvedLevelId, subjectIdx),
-    queryFn: () => fetchGrades(resolvedLevelId, subjectIdx),
-    enabled: !!resolvedLevelId,
-  });
-
-  useEffect(() => {
-    if (!selectedStudent || !gradesSheet) return;
-    const record = gradesSheet.records.find((r) => r.studentId === selectedStudent.id);
-    if (record) {
-      setAttendance(record.breakdown.attendance);
-      setShortExam(record.breakdown.shortExam);
-      setParticipation(record.breakdown.participation);
-      setFinalScore(record.breakdown.final);
-    } else {
-      setAttendance(0);
-      setShortExam(0);
-      setParticipation(0);
-      setFinalScore(0);
-    }
-  }, [selectedStudent, gradesSheet]);
-
-  const saveMutation = useMutation({
-    mutationFn: saveGradesBulk,
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: gradesQueryKeys.sheet(resolvedLevelId, subjectIdx),
-      });
-      Alert.alert("تم الحفظ", "تم حفظ الدرجات بنجاح", [
-        {
-          text: "حسناً",
-          onPress: () =>
-            goBack(
-              router,
-              `/main/subject/${resolvedLevelId}/${subjectIndex}` as import("expo-router").Href
-            ),
-        },
-      ]);
-    },
-    onError: (err: Error) => {
-      Alert.alert("خطأ", err.message);
-    },
-  });
-
-  const total = useMemo(
-    () => attendance + shortExam + participation + finalScore,
-    [attendance, shortExam, participation, finalScore]
-  );
-  const gradeInfo = useMemo(() => getGradeLabelInfo(total), [total]);
-
-  const isLoading = levelLoading || studentsLoading || gradesLoading;
+  const { user } = useAuth();
+  const [draft, setDraft] = useState<BreakdownMap>({});
+  const [baseline, setBaseline] = useState<BreakdownMap>({});
+  const [loaded, setLoaded] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
+  // قائمة ثابتة أثناء الرصد حتى لا تختفي الطالبة من الفلتر بمجرد تعديل درجتها
+  const [queue, setQueue] = useState<string[]>([]);
   const [exporting, setExporting] = useState(false);
 
-  const handleExportExcel = async () => {
-    if (exporting) return;
-    if (students.length === 0) {
-      Alert.alert("تنبيه", "لا توجد بيانات للتصدير");
-      return;
-    }
+  const levelQuery = useQuery({
+    queryKey: levelQueryKeys.detail(levelId),
+    queryFn: () => fetchLevelById(levelId),
+    enabled: !!levelId,
+  });
+  const studentsQuery = useQuery({
+    queryKey: levelQueryKeys.students(levelId),
+    queryFn: () => fetchLevelStudents(levelId),
+    enabled: !!levelId,
+  });
+  const gradesQuery = useQuery({
+    queryKey: gradesQueryKeys.sheet(levelId, subjectIdx),
+    queryFn: () => fetchGrades(levelId, subjectIdx),
+    enabled: !!levelId,
+  });
+  // الخادم يتحقق من الدرجات مقابل أوزان المركز — نستخدم نفسها كحدود عليا
+  const weightsQuery = useQuery({ queryKey: settingsQueryKeys.gradeWeights, queryFn: fetchGradeWeights });
+  const weights = weightsQuery.data ?? DEFAULT_WEIGHTS;
+
+  useEffect(() => {
+    if (!gradesQuery.data || loaded) return;
+    const map: BreakdownMap = {};
+    for (const record of gradesQuery.data.records) map[record.studentId] = { ...record.breakdown };
+    setDraft(map);
+    setBaseline(map);
+    setLoaded(true);
+  }, [gradesQuery.data, loaded]);
+
+  const students = useMemo(() => studentsQuery.data ?? [], [studentsQuery.data]);
+  const changedIds = useMemo(
+    () => new Set(students.filter((s) => !sameBreakdown(draft[s.id], baseline[s.id])).map((s) => s.id)),
+    [students, draft, baseline]
+  );
+  const dirty = changedIds.size > 0;
+  const ready = loaded && !studentsQuery.isLoading;
+
+  const visible = useMemo(() => {
+    const q = search.trim();
+    return students.filter((s) => {
+      if (q && !s.fullName.includes(q) && !s.idNumber.includes(q)) return false;
+      if (filter === "missing") return !draft[s.id];
+      if (filter === "changed") return changedIds.has(s.id);
+      return true;
+    });
+  }, [students, search, filter, draft, changedIds]);
+
+  const recorded = students.filter((s) => draft[s.id]);
+  const subjectAverage = recorded.length
+    ? Math.round((recorded.reduce((sum, s) => sum + totalOf(draft[s.id]), 0) / recorded.length) * 10) / 10
+    : null;
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saveGradesBulk({
+        levelId,
+        subjectIndex: subjectIdx,
+        records: students
+          .filter((s) => changedIds.has(s.id) && draft[s.id])
+          .map((s) => ({ studentId: s.id, breakdown: draft[s.id] })),
+      }),
+    onSuccess: (result) => {
+      setBaseline({ ...draft });
+      void queryClient.invalidateQueries({ queryKey: gradesQueryKeys.sheet(levelId, subjectIdx) });
+      void queryClient.invalidateQueries({ queryKey: levelQueryKeys.students(levelId) });
+      void queryClient.invalidateQueries({ queryKey: studentQueryKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ["student-grades"] });
+      void queryClient.invalidateQueries({ queryKey: ["reports"] });
+      toast.success(result?.message || `تم حفظ درجات ${result?.savedCount ?? ""} طالبة`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  useUnsavedChangesGuard(dirty && !saveMutation.isPending, "لم تُحفظ الدرجات بعد. هل تريدين الخروج دون حفظ؟");
+
+  const openEditor = useCallback(
+    (index: number) => {
+      setQueue(visible.map((s) => s.id));
+      setEditing(index);
+    },
+    [visible]
+  );
+  const editingStudent = editing != null ? students.find((s) => s.id === queue[editing]) ?? null : null;
+
+  const updateBreakdown = (breakdown: GradeBreakdown) => {
+    if (!editingStudent) return;
+    setDraft((prev) => ({ ...prev, [editingStudent.id]: breakdown }));
+  };
+
+  const exportSubject = async () => {
     setExporting(true);
     try {
-      const byId = new Map(
-        (gradesSheet?.records ?? []).map((r) => [r.studentId, r])
-      );
-      const rows = students.map((s) => {
-        const record = byId.get(s.id);
-        return {
-          الاسم: s.fullName,
-          "رقم الهوية": s.idNumber,
-          المادة: subjectName,
-          حضور: record?.breakdown.attendance ?? "",
-          "اختبار قصير": record?.breakdown.shortExam ?? "",
-          مشاركة: record?.breakdown.participation ?? "",
-          نهائي: record?.breakdown.final ?? "",
-          المجموع: record?.total ?? "",
-          التقدير: record?.label ?? "",
-        };
-      });
-      await exportRowsToExcel(
-        rows,
-        `grades_${subjectName}_${Date.now()}`,
-        "الدرجات"
+      const levelName = levelQuery.data?.shortName || levelQuery.data?.fullName || "";
+      await exportWorkbook(
+        [
+          {
+            name: name,
+            title: `سجل درجات ${name} — ${levelName}`,
+            subtitle: `${user?.centerProfile?.nameAr ?? ""} · ${WEIGHT_FIELDS.map((f) => `${f.label} ${weights[f.key]}`).join(" · ")}`,
+            columns: [
+              { header: "م", width: 5 },
+              { header: "اسم الطالبة", width: 28 },
+              { header: "الرقم المدني", width: 15 },
+              ...WEIGHT_FIELDS.map((f) => ({ header: `${f.label} (${weights[f.key]})`, width: 13 })),
+              { header: "المجموع", width: 9 },
+              { header: "التقدير", width: 12 },
+            ],
+            rows: students.map((s, i) => {
+              const b = baseline[s.id];
+              return [
+                i + 1,
+                s.fullName,
+                s.idNumber,
+                ...WEIGHT_FIELDS.map((f) => (b ? b[f.key] : "")),
+                b ? totalOf(b) : "",
+                b ? gradeLabel(totalOf(b)) : "",
+              ];
+            }),
+          },
+        ],
+        `درجات_${name}_${levelName}`
       );
     } catch (err) {
-      Alert.alert(
-        "خطأ",
-        err instanceof Error ? err.message : "تعذر تصدير الملف"
-      );
+      toast.error(err instanceof Error ? err.message : "تعذّر التصدير");
     } finally {
       setExporting(false);
     }
   };
 
-  const handleSave = () => {
-    if (!selectedStudent) {
-      Alert.alert("تنبيه", "اختر الطالبة أولاً");
-      return;
-    }
+  const loadError = levelQuery.error ?? studentsQuery.error ?? gradesQuery.error;
+  const missingCount = students.length - recorded.length;
 
-    saveMutation.mutate({
-      levelId: resolvedLevelId,
-      subjectIndex: subjectIdx,
-      records: [
-        {
-          studentId: selectedStudent.id,
-          breakdown: {
-            attendance,
-            shortExam,
-            participation,
-            final: finalScore,
-          },
-        },
-      ],
-    });
-  };
-
-  if (!resolvedLevelId) {
-    return (
-      <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-        <View style={styles.centered}>
-          <Text style={styles.errorText}>معرّف المستوى غير متوفر</Text>
+  const listHeader = ready && students.length ? (
+    <View style={styles.headerBlock}>
+      <Card style={styles.summary}>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text variant="headline" tabular>{`${recorded.length}/${students.length}`}</Text>
+            <Text variant="micro" color="textSecondary">مرصودة</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}>
+            <Text variant="headline" tabular>
+              {subjectAverage == null ? "—" : String(subjectAverage)}
+            </Text>
+            <Text variant="micro" color="textSecondary">متوسط المادة</Text>
+          </View>
+          {subjectAverage != null ? (
+            <>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <View>
+                  <Badge label={gradeLabel(subjectAverage)} tone={gradeTone(subjectAverage)} />
+                </View>
+                <Text variant="micro" color="textSecondary">التقدير العام</Text>
+              </View>
+            </>
+          ) : null}
         </View>
-      </SafeAreaView>
-    );
-  }
+        <Text variant="caption" color="textMuted" align="center">
+          {`التوزيع: ${WEIGHT_FIELDS.map((f) => `${f.short} ${weights[f.key]}`).join(" · ")}`}
+        </Text>
+      </Card>
+      <FilterBar
+        options={[
+          { id: "all", label: "الكل", count: students.length },
+          { id: "missing", label: "لم تُرصد", count: missingCount },
+          { id: "changed", label: "غير محفوظة", count: changedIds.size },
+        ]}
+        value={filter}
+        onChange={(value: Filter) => {
+          setFilter(value);
+          setEditing(null);
+        }}
+      />
+      {students.length > 8 ? (
+        <SearchBar value={search} onChangeText={setSearch} placeholder="ابحثي بالاسم أو الرقم المدني" />
+      ) : null}
+    </View>
+  ) : null;
 
   return (
-    <SafeAreaView
-      style={[styles.safe, { direction: I18nManager.isRTL ? "rtl" : "ltr" }]}
-      edges={["top", "bottom"]}
-    >
-      <View style={styles.main}>
-        <View
-          style={[
-            styles.topBar,
-            { justifyContent: I18nManager.isRTL ? "flex-end" : "flex-start" },
-          ]}
-        >
-          <Pressable
-            style={styles.backButton}
-            onPress={() =>
-              goBack(
-                router,
-                `/main/subject/${resolvedLevelId}/${subjectIndex}` as import("expo-router").Href
-              )
-            }
-          >
-            <MaterialCommunityIcons
-              name={I18nManager.isRTL ? "chevron-right" : "chevron-left"}
-              size={24}
-              color={centerColors.text}
+    <Screen
+      scroll={false}
+      padded={false}
+      header={
+        <Header
+          back={`/main/subject/${levelId}/${subjectIdx}` as Href}
+          title={`درجات ${name}`}
+          subtitle={levelQuery.data?.shortName || levelQuery.data?.fullName}
+          actions={
+            <IconButton
+              icon="microsoft-excel"
+              accessibilityLabel={exporting ? "جاري التصدير" : "تصدير درجات المادة Excel"}
+              variant="surface"
+              disabled={!ready || exporting || students.length === 0}
+              onPress={() => void exportSubject()}
             />
-            <Text style={styles.backButtonText}>تفاصيل المادة</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.header}>
-          <Pressable
-            style={[styles.exportButton, exporting && { opacity: 0.6 }]}
-            onPress={handleExportExcel}
-            disabled={exporting || isLoading}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color={centerColors.textOnAccent} />
-            ) : (
-              <MaterialCommunityIcons
-                name="microsoft-excel"
-                size={20}
-                color={centerColors.textOnAccent}
-              />
-            )}
-          </Pressable>
-          <Pressable
-            style={[styles.saveButton, saveMutation.isPending && styles.saveButtonDisabled]}
-            onPress={handleSave}
-            disabled={saveMutation.isPending || isLoading}
-          >
-            {saveMutation.isPending ? (
-              <ActivityIndicator size="small" color={centerColors.textOnAccent} />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="content-save" size={18} color={centerColors.textOnAccent} />
-                <Text style={styles.saveButtonText}>حفظ</Text>
-              </>
-            )}
-          </Pressable>
-        </View>
-
-        {isLoading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color={centerColors.accent} />
+          }
+        />
+      }
+      footer={
+        students.length ? (
+          <View style={styles.footer}>
+            {dirty ? (
+              <Text variant="caption" color="accentStrong" align="center">
+                {`درجات ${changedIds.size} طالبة لم تُحفظ بعد`}
+              </Text>
+            ) : null}
+            <Button
+              fullWidth
+              size="lg"
+              icon="content-save-outline"
+              onPress={() => saveMutation.mutate()}
+              loading={saveMutation.isPending}
+              disabled={!ready || !dirty}
+            >
+              {dirty ? `حفظ الدرجات (${changedIds.size})` : "الدرجات محفوظة"}
+            </Button>
           </View>
-        ) : (
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.titleCenter}>
-              <MaterialCommunityIcons name="notebook" size={24} color={centerColors.text} />
-              <Text style={styles.headerTitle}>سجل الدرجات</Text>
-            </View>
-            <Text style={styles.levelSubtitle}>{level?.fullName ?? "—"}</Text>
+        ) : null
+      }
+    >
+      {loadError && !ready ? (
+        <ErrorState
+          message={(loadError as Error).message}
+          onRetry={() => {
+            void levelQuery.refetch();
+            void studentsQuery.refetch();
+            void gradesQuery.refetch();
+          }}
+        />
+      ) : (
+        <FlatList
+          data={ready ? visible : []}
+          keyExtractor={(item) => item.id}
+          ListHeaderComponent={listHeader}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          initialNumToRender={12}
+          windowSize={7}
+          ItemSeparatorComponent={Separator}
+          refreshControl={
+            <RefreshControl
+              refreshing={studentsQuery.isRefetching}
+              onRefresh={() => void studentsQuery.refetch()}
+              tintColor={colors.primary}
+            />
+          }
+          ListEmptyComponent={
+            !ready ? (
+              <SkeletonList rows={6} />
+            ) : students.length === 0 ? (
+              <EmptyState
+                icon="account-group-outline"
+                title="لا توجد طالبات في هذا المستوى"
+                description="تظهر الطالبات المسجّلات في المستوى هنا لرصد درجاتهن"
+              />
+            ) : (
+              <EmptyState
+                compact
+                icon={filter === "missing" ? "check-all" : "account-search-outline"}
+                title={filter === "missing" ? "رُصدت درجات الجميع" : filter === "changed" ? "لا تعديلات غير محفوظة" : "لا نتائج مطابقة"}
+              />
+            )
+          }
+          renderItem={({ item, index }) => (
+            <GradeRow
+              student={item}
+              index={index}
+              breakdown={draft[item.id] ?? null}
+              changed={changedIds.has(item.id)}
+              onPress={openEditor}
+            />
+          )}
+        />
+      )}
 
-            <View style={styles.cardWrapper}>
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardHeaderRight}>
-                    <Text style={styles.subjectName}>{subjectName}</Text>
-                  </View>
-                  <View style={styles.cardHeaderLeft}>
-                    <Text style={styles.totalScore}>{total}</Text>
-                    <View style={[styles.gradeBadge, { backgroundColor: gradeInfo.bg }]}>
-                      <Text style={[styles.gradeBadgeText, { color: gradeInfo.text }]}>
-                        {gradeInfo.label}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.inputsSection}>
-                  <View style={styles.dropdownSection}>
-                    <Text style={styles.inputLabel}>الطالبة</Text>
-                    <Pressable
-                      style={styles.dropdownTrigger}
-                      onPress={() => setStudentDropdownVisible(true)}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownText,
-                          !selectedStudent && styles.dropdownPlaceholder,
-                        ]}
-                      >
-                        {selectedStudent?.name ?? "اختر الطالبة"}
-                      </Text>
-                      <MaterialCommunityIcons
-                        name="chevron-down"
-                        size={20}
-                        color={centerColors.textSecondary}
-                      />
-                    </Pressable>
-                    <Modal
-                      visible={studentDropdownVisible}
-                      transparent
-                      animationType="fade"
-                      onRequestClose={() => setStudentDropdownVisible(false)}
-                    >
-                      <Pressable
-                        style={styles.modalOverlay}
-                        onPress={() => setStudentDropdownVisible(false)}
-                      >
-                        <View style={styles.modalContent}>
-                          <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator>
-                            {students.length === 0 ? (
-                              <Text style={styles.emptyText}>لا توجد طالبات في هذا المستوى</Text>
-                            ) : (
-                              students.map((s) => (
-                                <Pressable
-                                  key={s.id}
-                                  style={styles.modalOption}
-                                  onPress={() => {
-                                    setSelectedStudent({ id: s.id, name: s.fullName });
-                                    setStudentDropdownVisible(false);
-                                  }}
-                                >
-                                  <Text style={styles.modalOptionText}>{s.fullName}</Text>
-                                </Pressable>
-                              ))
-                            )}
-                          </ScrollView>
-                        </View>
-                      </Pressable>
-                    </Modal>
-                  </View>
-
-                  <View style={styles.inputRow2}>
-                    <GradeInput
-                      label="مشاركة"
-                      value={participation}
-                      onChange={setParticipation}
-                      max={GRADE_WEIGHTS.participation}
-                    />
-                  </View>
-                  <View style={styles.verticalInputs}>
-                    <GradeInput
-                      label="اختبار قصير"
-                      value={shortExam}
-                      onChange={setShortExam}
-                      max={GRADE_WEIGHTS.shortExam}
-                      fullWidth
-                    />
-                    <GradeInput
-                      label="حضور"
-                      value={attendance}
-                      onChange={setAttendance}
-                      max={GRADE_WEIGHTS.attendance}
-                      fullWidth
-                    />
-                  </View>
-                  <View style={styles.summaryRow}>
-                    <GradeInput
-                      label="نهائي"
-                      value={finalScore}
-                      onChange={setFinalScore}
-                      max={GRADE_WEIGHTS.final}
-                      fullWidth
-                    />
-                  </View>
-                </View>
-              </View>
-            </View>
-          </ScrollView>
-        )}
-      </View>
-    </SafeAreaView>
+      <GradeEditorSheet
+        student={editingStudent}
+        position={editing != null ? `${editing + 1} من ${queue.length} · ${name}` : ""}
+        breakdown={editingStudent ? draft[editingStudent.id] ?? EMPTY : EMPTY}
+        weights={weights}
+        onChange={updateBreakdown}
+        onPrev={editing != null && editing > 0 ? () => setEditing(editing - 1) : undefined}
+        onNext={editing != null && editing < queue.length - 1 ? () => setEditing(editing + 1) : undefined}
+        onClose={() => setEditing(null)}
+      />
+    </Screen>
   );
 }
 
+function Separator() {
+  return <View style={styles.separator} />;
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: centerColors.background },
-  main: { flex: 1, padding: spacing.lg },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-  },
-  errorText: {
-    fontSize: 14,
-    color: centerColors.accentRed,
-    textAlign: "center",
-  },
-  emptyText: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-    padding: spacing.lg,
-  },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  backButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: centerColors.text,
-    fontWeight: "600",
-    textAlign: "right",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  titleCenter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: centerColors.text,
-    textAlign: "center",
-  },
-  levelSubtitle: {
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-    marginBottom: spacing.lg,
-  },
-  exportButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: centerColors.primaryButton,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: 8,
-  },
-  saveButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: centerColors.primaryButton,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: 8,
-    gap: spacing.xs,
-    minWidth: 72,
-    justifyContent: "center",
-  },
-  saveButtonDisabled: { opacity: 0.7 },
-  saveButtonText: {
-    color: centerColors.textOnAccent,
-    fontSize: 14,
-    fontWeight: "700",
-    textAlign: "right",
-  },
-  scroll: { flex: 1 },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: spacing.xxl,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardWrapper: {
-    width: "100%",
-    maxWidth: 320,
-    alignSelf: "center",
-  },
-  card: {
-    backgroundColor: centerColors.cardBg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    padding: spacing.md,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: spacing.lg,
-  },
-  cardHeaderRight: {
-    alignItems: I18nManager.isRTL ? "flex-end" : "flex-start",
-  },
-  cardHeaderLeft: {
-    alignItems: I18nManager.isRTL ? "flex-start" : "flex-end",
-  },
-  subjectName: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: 2,
-    textAlign: "right",
-  },
-  totalScore: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: centerColors.accent,
-    marginBottom: spacing.xs,
-    textAlign: "right",
-  },
-  gradeBadge: {
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  gradeBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "right",
-  },
-  inputsSection: {
-    gap: spacing.md,
-  },
-  dropdownSection: {
-    marginBottom: spacing.sm,
-  },
-  dropdownTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    minHeight: 40,
-    backgroundColor: centerColors.cardBg,
-  },
-  dropdownText: {
-    fontSize: 14,
-    color: centerColors.text,
-    textAlign: "right",
-  },
-  dropdownPlaceholder: {
-    color: centerColors.textSecondary,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    padding: spacing.xl,
-  },
-  modalContent: {
-    backgroundColor: centerColors.cardBg,
-    borderRadius: 12,
-    padding: spacing.sm,
-    maxHeight: 400,
-  },
-  modalScroll: {
-    maxHeight: 360,
-  },
-  modalOption: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: centerColors.cardBorder,
-  },
-  modalOptionText: {
-    fontSize: 14,
-    color: centerColors.text,
-    textAlign: "right",
-  },
-  verticalInputs: {
-    flexDirection: "column",
-    gap: spacing.sm,
-  },
-  summaryRow: {
-    marginTop: spacing.sm,
-    flexDirection: "column",
-    gap: spacing.sm,
-  },
-  inputRow2: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  inputGroup: {
-    flex: 1,
-    minWidth: 80,
-  },
-  inputGroupFullWidth: {
-    flex: 0,
-    minWidth: undefined,
-    width: "100%",
-  },
-  inputLabel: {
-    fontSize: 11,
-    color: centerColors.textSecondary,
-    marginBottom: spacing.xs,
-    textAlign: "right",
-  },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 6,
-    backgroundColor: centerColors.cardBg,
-  },
-  spinnerButtons: {
-    flexDirection: "column",
-    borderRightWidth: 1,
-    borderRightColor: centerColors.cardBorder,
-  },
-  spinnerBtn: {
-    padding: 2,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    fontSize: 14,
-    color: centerColors.text,
-    textAlign: "right",
-  },
+  headerBlock: { gap: space[3], paddingTop: space[2], paddingBottom: space[3] },
+  summary: { gap: space[3] },
+  summaryRow: { flexDirection: "row", alignItems: "center" },
+  summaryItem: { flex: 1, alignItems: "center", gap: 2 },
+  summaryDivider: { width: StyleSheet.hairlineWidth, alignSelf: "stretch", backgroundColor: colors.divider },
+  listContent: { paddingHorizontal: layout.screenPadding, paddingBottom: space[6] },
+  separator: { height: space[2] },
+  footer: { gap: space[2] },
 });

@@ -15,6 +15,7 @@ import {
 import { isValidSubjectIndex } from '../constants/subjects';
 import { sendError, sendSuccess } from '../utils/response';
 import { notifyUsers } from '../services/pushService';
+import { materializeOfferSessions } from '../utils/sessionSchedule';
 
 function formatSession(
   session: {
@@ -119,6 +120,10 @@ export async function listMySessions(req: Request, res: Response): Promise<void>
       };
     }
 
+    if (from && to) {
+      await materializeOfferSessions(req.user.centerId, from, to);
+    }
+
     const sessions = await Session.find(filter).sort({ startAt: 1 }).lean();
     sendSuccess(
       res,
@@ -174,6 +179,12 @@ export async function listSessions(req: Request, res: Response): Promise<void> {
         ...(from ? { $gte: from } : {}),
         ...(to ? { $lte: to } : {}),
       };
+    }
+
+    if (from && to) {
+      await materializeOfferSessions(req.user.centerId, from, to, {
+        levelId: levelId || null,
+      });
     }
 
     const sessions = await Session.find(filter).sort({ startAt: 1 }).lean();

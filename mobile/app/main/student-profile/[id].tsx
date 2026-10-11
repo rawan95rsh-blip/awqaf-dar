@@ -1,859 +1,557 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  I18nManager,
-  Platform,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useMemo, useState } from "react";
+import { Linking, StyleSheet, View } from "react-native";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { centerColors, spacing } from "@/constants";
+import { colors, space } from "@/src/theme";
+import {
+  Avatar,
+  Badge,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Header,
+  IconButton,
+  InfoRow,
+  ListItem,
+  LoadingState,
+  PromptSheet,
+  Screen,
+  Section,
+  SelectField,
+  StatTile,
+  Text,
+  useToast,
+} from "@/src/ui";
 import {
   fetchStudentById,
   promoteStudent,
+  reinstateStudent,
   studentQueryKeys,
+  suspendStudent,
+  updateStudent,
   updateStudentEnrollmentStatus,
 } from "@/src/api/students";
+import { fetchStudentAttendance, fetchStudentGrades, gradesQueryKeys } from "@/src/api/grades";
+import { fetchPublicCenters } from "@/src/api/registrationRequests";
+import { fetchLevelsByCenter, levelQueryKeys } from "@/src/api/levels";
 import {
-  fetchStudentAttendance,
-  fetchStudentGrades,
-  gradesQueryKeys,
-} from "@/src/api/grades";
-import { getSubjectName } from "@/src/constants/subjects";
-import { getGradeLabelInfo } from "@/src/constants/grades";
-import type { AttendanceCalendarDay } from "@/src/types/student";
+  cancelTransfer,
+  createTransfer,
+  listCenterTransfers,
+  TRANSFER_STATUS_LABELS,
+  transferQueryKeys,
+} from "@/src/api/transfers";
+import { useAuth } from "@/src/context/AuthContext";
+import AttendanceCalendar from "@/src/components/AttendanceCalendar";
+import DocumentViewer from "@/src/components/DocumentViewer";
 import {
-  ACADEMIC_LEVEL_OPTIONS,
-  NATIONALITY_OPTIONS,
-} from "@/src/constants/registrationOptions";
-import {
-  ENROLLMENT_STATUS_LABELS,
-  ENROLLMENT_STATUS_OPTIONS,
-  type EnrollmentStatus,
-} from "@/src/constants/enrollment";
-import { goBack } from "@/src/utils/navigation";
+  ENROLLMENT_ACTION_LABELS,
+  ENROLLMENT_LABELS,
+  ENROLLMENT_TONES,
+  PERFORMANCE,
+  STUDENT_TYPE_LABELS,
+  TRACK_LABELS,
+  academicLevelLabel,
+  nationalityLabel,
+  occupationLabel,
+  subjectName,
+} from "@/src/constants/domain";
+import { formatPhone } from "@/src/constants/phone";
+import { formatAddress } from "@/src/types/student";
+import { formatDateLong, formatDateShort } from "@/src/utils/format";
 
-const PROFILE_HEADER = centerColors.headerDark;
-
-const WEEK_DAYS = ["أح", "اث", "ثل", "أر", "خم", "جم", "سب"];
-
-function getOptionLabel(
-  options: { id: string; label: string }[],
-  id: string
-): string {
-  return options.find((option) => option.id === id)?.label ?? id;
-}
-
-function formatDob(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-");
-  if (!year || !month || !day) return isoDate;
-  return `${day}/${month}/${year}`;
-}
-
-function getCalendarCellColor(status: AttendanceCalendarDay["status"]): string {
-  if (status === "present") return centerColors.accentGreen;
-  if (status === "absent") return centerColors.accentRed;
-  if (status === "late") return centerColors.accentOrange;
-  return centerColors.cardBorder;
-}
+type Dialog = null | "suspend" | "reinstate" | "transfer" | "graduate" | "notes";
 
 export default function StudentProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const studentId = id ?? "";
+  const router = useRouter();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const centerId = user?.centerProfile?.id ?? "";
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [transferCenterId, setTransferCenterId] = useState<string | null>(null);
+  const [reinstateLevelId, setReinstateLevelId] = useState<string | null>(null);
 
-  const {
-    data: profile,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useQuery({
+  const profileQuery = useQuery({
     queryKey: studentQueryKeys.detail(studentId),
     queryFn: () => fetchStudentById(studentId),
     enabled: !!studentId,
   });
-
-  const enrollmentMutation = useMutation({
-    mutationFn: (enrollmentStatus: EnrollmentStatus) =>
-      updateStudentEnrollmentStatus(studentId, enrollmentStatus),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: studentQueryKeys.detail(studentId) });
-      queryClient.invalidateQueries({ queryKey: studentQueryKeys.list({}) });
-      Alert.alert("تم", "تم تحديث حالة القيد");
-    },
-    onError: (err: Error) => Alert.alert("خطأ", err.message),
-  });
-
-  const promoteMutation = useMutation({
-    mutationFn: () => promoteStudent(studentId),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: studentQueryKeys.detail(studentId) });
-      queryClient.invalidateQueries({ queryKey: studentQueryKeys.list({}) });
-      Alert.alert(
-        "تم",
-        data.levelName
-          ? `تمت الترقية إلى «${data.levelName}»`
-          : "تمت الترقية للمستوى التالي"
-      );
-    },
-    onError: (err: Error) => Alert.alert("خطأ", err.message),
-  });
-
-  const handlePromote = () => {
-    if (!profile) return;
-    const nextHint =
-      profile.level?.order != null
-        ? `من «${profile.levelName}» إلى المستوى التالي؟`
-        : `ترقية «${profile.fullName}» للمستوى التالي؟`;
-    Alert.alert("ترقية مسار المطور", nextHint, [
-      { text: "إلغاء", style: "cancel" },
-      {
-        text: "ترقية",
-        onPress: () => promoteMutation.mutate(),
-      },
-    ]);
-  };
-
-  const handleEnrollmentChange = (next: EnrollmentStatus) => {
-    if (!profile || profile.enrollmentStatus === next) return;
-    Alert.alert(
-      "تأكيد",
-      `تعيين حالة القيد إلى «${ENROLLMENT_STATUS_LABELS[next]}»؟`,
-      [
-        { text: "إلغاء", style: "cancel" },
-        {
-          text: "تأكيد",
-          onPress: () => enrollmentMutation.mutate(next),
-        },
-      ]
-    );
-  };
-
-  const { data: studentGrades } = useQuery({
+  const gradesQuery = useQuery({
     queryKey: gradesQueryKeys.student(studentId),
     queryFn: () => fetchStudentGrades(studentId),
     enabled: !!studentId,
   });
-
-  const { data: studentAttendance } = useQuery({
+  const attendanceQuery = useQuery({
     queryKey: gradesQueryKeys.studentAttendance(studentId),
     queryFn: () => fetchStudentAttendance(studentId),
     enabled: !!studentId,
   });
+  const transfersQuery = useQuery({ queryKey: transferQueryKeys.center, queryFn: listCenterTransfers });
+  const levelsQuery = useQuery({
+    queryKey: levelQueryKeys.list(centerId),
+    queryFn: () => fetchLevelsByCenter(centerId),
+    enabled: dialog === "reinstate" && !!centerId,
+  });
 
-  const attendancePercent =
-    studentAttendance?.attendancePercent ?? profile?.attendancePercent;
-  const gradeAverage = profile?.gradeAverage;
-  const absentDays = studentAttendance?.absentDays ?? profile?.absentDays ?? 0;
-  const calendar =
-    studentAttendance?.calendar ?? profile?.attendanceCalendar ?? [];
-  const grades = studentGrades?.grades ?? [];
-  const hasGrades = grades.length > 0;
-  const hasAttendance = calendar.some((day) => day.status != null);
+  const profile = profileQuery.data;
+  const centersQuery = useQuery({
+    queryKey: ["public-centers", profile?.gender ?? "female"],
+    queryFn: () => fetchPublicCenters(profile?.gender ?? "female"),
+    enabled: dialog === "transfer" && !!profile,
+  });
+
+  const openTransfer = useMemo(
+    () =>
+      (transfersQuery.data ?? []).find(
+        (t) => t.studentId === studentId && (t.status === "pending_source" || t.status === "pending_destination")
+      ),
+    [transfersQuery.data, studentId]
+  );
+
+  const refreshAll = () => {
+    void queryClient.invalidateQueries({ queryKey: studentQueryKeys.all });
+    void queryClient.invalidateQueries({ queryKey: transferQueryKeys.center });
+    void queryClient.invalidateQueries({ queryKey: ["level-students"] });
+    void queryClient.invalidateQueries({ queryKey: ["levels"] });
+  };
+
+  const onDone = (message?: string) => {
+    setDialog(null);
+    refreshAll();
+    if (message) toast.success(message);
+  };
+  const onFail = (err: Error) => toast.error(err.message);
+
+  const suspendMutation = useMutation({
+    mutationFn: (reason: string) => suspendStudent(studentId, reason),
+    onSuccess: (r) => onDone(r.message),
+    onError: onFail,
+  });
+  const reinstateMutation = useMutation({
+    mutationFn: (reason: string) => reinstateStudent(studentId, { reason, levelId: reinstateLevelId ?? undefined }),
+    onSuccess: (r) => onDone(r.message),
+    onError: onFail,
+  });
+  const graduateMutation = useMutation({
+    mutationFn: (reason: string) => updateStudentEnrollmentStatus(studentId, "graduated", reason),
+    onSuccess: () => onDone("تم تعيين الطالبة خريجة — بارك الله فيها"),
+    onError: onFail,
+  });
+  const promoteMutation = useMutation({
+    mutationFn: () => promoteStudent(studentId),
+    onSuccess: (r) => onDone(r.message),
+    onError: onFail,
+  });
+  const transferMutation = useMutation({
+    mutationFn: (reason: string) => createTransfer({ studentId, toCenterId: transferCenterId!, reason }),
+    onSuccess: (r) => onDone(r.message),
+    onError: onFail,
+  });
+  const cancelTransferMutation = useMutation({
+    mutationFn: (transferId: string) => cancelTransfer(transferId),
+    onSuccess: (r) => onDone(r.message),
+    onError: onFail,
+  });
+  const notesMutation = useMutation({
+    mutationFn: (notes: string) => updateStudent(studentId, { notes }),
+    onSuccess: () => onDone("تم حفظ الملاحظات"),
+    onError: onFail,
+  });
+
+  if (profileQuery.isLoading) {
+    return (
+      <Screen header={<Header back={"/main/students" as Href} title="ملف الطالبة" />}>
+        <LoadingState />
+      </Screen>
+    );
+  }
+
+  if (profileQuery.isError || !profile) {
+    return (
+      <Screen header={<Header back={"/main/students" as Href} title="ملف الطالبة" />}>
+        <ErrorState message={(profileQuery.error as Error)?.message} onRetry={() => profileQuery.refetch()} />
+      </Screen>
+    );
+  }
+
+  const status = profile.enrollmentStatus;
+  const perf = PERFORMANCE[profile.status] ?? PERFORMANCE.regular;
+  const isEnrolled = status === "enrolled";
+  const canPromote =
+    isEnrolled && !!profile.level && !(profile.level.track === "mutor" && profile.level.order >= 8);
+  const calendar = attendanceQuery.data?.calendar ?? profile.attendanceCalendar ?? [];
+  const grades = gradesQuery.data?.grades ?? [];
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Pressable
-            style={styles.backBtn}
-            onPress={() =>
-              goBack(router, "/main/students" as import("expo-router").Href)
-            }
-            accessibilityLabel="رجوع"
-          >
-            <MaterialCommunityIcons
-              name={I18nManager.isRTL ? "chevron-right" : "chevron-left"}
-              size={24}
-              color={centerColors.textOnAccent}
+    <Screen
+      refreshing={profileQuery.isRefetching}
+      onRefresh={() => {
+        void profileQuery.refetch();
+        void gradesQuery.refetch();
+        void attendanceQuery.refetch();
+      }}
+      header={
+        <Header
+          back={"/main/students" as Href}
+          title="ملف الطالبة"
+          actions={
+            <IconButton
+              icon="pencil-outline"
+              accessibilityLabel="تعديل البيانات"
+              onPress={() => router.push(`/main/student-edit/${studentId}` as Href)}
             />
-          </Pressable>
-          <Text style={styles.headerTitle}>ملف الطالب</Text>
-
-          {isLoading ? (
-            <ActivityIndicator color={centerColors.textOnAccent} style={styles.loader} />
-          ) : isError ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>
-                {error instanceof Error ? error.message : "تعذر تحميل الملف"}
-              </Text>
-              <Pressable onPress={() => refetch()}>
-                <Text style={styles.retryText}>إعادة المحاولة</Text>
-              </Pressable>
-            </View>
-          ) : profile ? (
-            <>
-              <View style={styles.avatarWrap}>
-                <Text style={styles.avatarEmoji}>👤</Text>
-              </View>
-              <Text style={styles.studentName}>{profile.fullName}</Text>
-              <View style={styles.badgesRow}>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{profile.idNumber}</Text>
-                </View>
-                <View style={[styles.badge, styles.badgeCourse]}>
-                  <Text style={styles.badgeText}>
-                    {profile.levelShortName || profile.levelName}
-                  </Text>
-                </View>
-                <View style={[styles.badge, styles.badgeActive]}>
-                  <MaterialCommunityIcons name="check" size={14} color={centerColors.textOnAccent} />
-                  <Text style={styles.badgeTextActive}>
-                    {ENROLLMENT_STATUS_LABELS[
-                      (profile.enrollmentStatus ?? "enrolled") as EnrollmentStatus
-                    ]}
-                  </Text>
-                </View>
-              </View>
-            </>
-          ) : null}
+          }
+        />
+      }
+    >
+      {/* البطاقة التعريفية */}
+      <Card padding={5} style={styles.hero}>
+        <Avatar name={profile.fullName} uri={profile.photoUrl} size={80} />
+        <Text variant="title" align="center">
+          {profile.fullName}
+        </Text>
+        <View style={styles.badges}>
+          <Badge label={ENROLLMENT_LABELS[status]} tone={ENROLLMENT_TONES[status]} />
+          <Badge
+            label={profile.levelShortName || TRACK_LABELS[profile.track]}
+            tone="primary"
+            icon="layers-outline"
+          />
+          {profile.studentType ? <Badge label={STUDENT_TYPE_LABELS[profile.studentType]} tone="info" /> : null}
+          {isEnrolled ? <Badge label={perf.label} tone={perf.tone} icon={perf.icon} /> : null}
         </View>
+        <View style={styles.contactRow}>
+          <Button
+            variant="tonal"
+            size="sm"
+            icon="phone-outline"
+            onPress={() => Linking.openURL(`tel:+${profile.phone}`)}
+          >
+            اتصال
+          </Button>
+          <Button
+            variant="tonal"
+            size="sm"
+            icon="whatsapp"
+            onPress={() => Linking.openURL(`https://wa.me/${profile.phone}`)}
+          >
+            واتساب
+          </Button>
+        </View>
+      </Card>
 
-        {profile ? (
-          <>
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>حالة القيد</Text>
-              <View style={styles.enrollmentRow}>
-                {ENROLLMENT_STATUS_OPTIONS.map((opt) => {
-                  const selected =
-                    (profile.enrollmentStatus ?? "enrolled") === opt.id;
-                  return (
-                    <Pressable
-                      key={opt.id}
-                      style={[
-                        styles.enrollmentChip,
-                        selected && styles.enrollmentChipOn,
-                      ]}
-                      disabled={enrollmentMutation.isPending}
-                      onPress={() => handleEnrollmentChange(opt.id)}
-                    >
-                      <Text
-                        style={[
-                          styles.enrollmentChipText,
-                          selected && styles.enrollmentChipTextOn,
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            {(profile.track ?? "mutor") === "mutor" ? (
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>مسار المطور</Text>
-                <Text style={styles.mutorHint}>
-                  الترم ≈ 3 أشهر — الترقية يدوية من المشرفة (بدون أتمتة).
-                </Text>
-                <Pressable
-                  style={[
-                    styles.promoteBtn,
-                    (promoteMutation.isPending ||
-                      (profile.enrollmentStatus ?? "enrolled") !== "enrolled" ||
-                      (profile.level?.order ?? 0) >= 8) &&
-                      styles.promoteBtnDisabled,
-                  ]}
-                  disabled={
-                    promoteMutation.isPending ||
-                    (profile.enrollmentStatus ?? "enrolled") !== "enrolled" ||
-                    (profile.level?.order ?? 0) >= 8
-                  }
-                  onPress={handlePromote}
+      {openTransfer ? (
+        <View style={styles.spacer}>
+          <Banner
+            tone="info"
+            icon="swap-horizontal"
+            title={`طلب نقل إلى ${openTransfer.toCenterName}`}
+            action={
+              openTransfer.direction === "outgoing" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={cancelTransferMutation.isPending}
+                  onPress={() => cancelTransferMutation.mutate(openTransfer.id)}
+                  style={styles.bannerAction}
                 >
-                  {promoteMutation.isPending ? (
-                    <ActivityIndicator color={centerColors.textOnAccent} />
-                  ) : (
-                    <>
-                      <MaterialCommunityIcons
-                        name="arrow-up-bold-circle-outline"
-                        size={20}
-                        color={centerColors.textOnAccent}
-                      />
-                      <Text style={styles.promoteBtnText}>
-                        ترقية للمستوى التالي
-                      </Text>
-                    </>
-                  )}
-                </Pressable>
-                {(profile.level?.order ?? 0) >= 8 ? (
-                  <Text style={styles.mutorHint}>
-                    أعلى مستوى مطور — عيّني حالة القيد إلى خريجة عند اكتمال المسار.
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
+                  إلغاء الطلب
+                </Button>
+              ) : null
+            }
+          >
+            {TRANSFER_STATUS_LABELS[openTransfer.status]}
+          </Banner>
+        </View>
+      ) : null}
 
-            <View style={styles.kpiCard}>
-              <View style={styles.kpiItem}>
-                <Text style={styles.kpiValueRed}>{absentDays}</Text>
-                <Text style={styles.kpiLabel}>غياب</Text>
-              </View>
-              <View style={styles.kpiItem}>
-                <Text style={styles.kpiValueOrange}>
-                  {gradeAverage == null ? "—" : gradeAverage}
-                </Text>
-                <Text style={styles.kpiLabel}>المعدل</Text>
-              </View>
-              <View style={styles.kpiItem}>
-                <Text style={styles.kpiValueGreen}>
-                  {attendancePercent == null ? "—" : `${attendancePercent}%`}
-                </Text>
-                <Text style={styles.kpiLabel}>الحضور</Text>
-              </View>
-            </View>
+      {status === "suspended" ? (
+        <View style={styles.spacer}>
+          <Banner tone="danger" title="قيد الطالبة موقوف">
+            {profile.enrollmentHistory.find((e) => e.action === "suspended")?.reason ||
+              "لا تستطيع الطالبة تسجيل الدخول حتى إعادة القيد"}
+          </Banner>
+        </View>
+      ) : null}
 
-            <View style={styles.actionsGrid}>
-              <Pressable style={[styles.actionBtn, styles.actionBtnBlue]}>
-                <MaterialCommunityIcons name="printer" size={20} color={centerColors.accent} />
-                <Text style={styles.actionBtnTextBlue}>طباعة السجل</Text>
-              </Pressable>
-              <Pressable style={[styles.actionBtn, styles.actionBtnDark]}>
-                <MaterialCommunityIcons name="pencil" size={20} color={centerColors.textOnAccent} />
-                <Text style={styles.actionBtnTextWhite}>تعديل البيانات</Text>
-              </Pressable>
-              <Pressable style={[styles.actionBtn, styles.actionBtnRed]}>
-                <MaterialCommunityIcons name="close-circle-outline" size={20} color={centerColors.accentRed} />
-                <Text style={styles.actionBtnTextRed}>رفض / إلغاء</Text>
-              </Pressable>
-              <Pressable style={[styles.actionBtn, styles.actionBtnGreen]}>
-                <MaterialCommunityIcons name="check" size={20} color={centerColors.textOnAccent} />
-                <Text style={styles.actionBtnTextWhite}>قبول الطلب</Text>
-              </Pressable>
-            </View>
+      <View style={styles.stats}>
+        <StatTile
+          label="الحضور"
+          value={(attendanceQuery.data?.attendancePercent ?? profile.attendancePercent) == null ? "—" : `${attendanceQuery.data?.attendancePercent ?? profile.attendancePercent}%`}
+          icon="calendar-check"
+          tone="success"
+        />
+        <StatTile label="المعدل" value={profile.gradeAverage ?? "—"} icon="chart-line" tone="accent" />
+        <StatTile
+          label="أيام الغياب"
+          value={attendanceQuery.data?.absentDays ?? profile.absentDays ?? 0}
+          icon="calendar-remove"
+          tone="danger"
+        />
+      </View>
 
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionTitleRow}>
-                  <MaterialCommunityIcons name="account" size={20} color={PROFILE_HEADER} />
-                  <Text style={styles.sectionTitle}>البيانات الشخصية</Text>
-                </View>
-                <Pressable>
-                  <Text style={styles.editLink}>تعديل</Text>
-                </Pressable>
-              </View>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>الاسم الكامل</Text>
-                <Text style={styles.dataValue}>{profile.fullName}</Text>
-              </View>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>رقم الهوية المدنية</Text>
-                <Text style={styles.dataValue}>{profile.idNumber}</Text>
-              </View>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>تاريخ الميلاد</Text>
-                <Text style={styles.dataValue}>{formatDob(profile.dob)}</Text>
-              </View>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>الجنسية</Text>
-                <Text style={styles.dataValue}>
-                  {getOptionLabel(NATIONALITY_OPTIONS, profile.nationality)}
-                </Text>
-              </View>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>المستوى الدراسي</Text>
-                <Text style={styles.dataValue}>
-                  {getOptionLabel(ACADEMIC_LEVEL_OPTIONS, profile.academicLevel)}
-                </Text>
-              </View>
-              <View style={[styles.dataRow, styles.dataRowLast]}>
-                <Text style={styles.dataLabel}>رقم الهاتف</Text>
-                <Text style={styles.dataValue}>{profile.phone}</Text>
-              </View>
-            </View>
+      {/* إجراءات القيد */}
+      <Section title="إجراءات القيد">
+        <Card padding={0} style={styles.listCard}>
+          {canPromote ? (
+            <ListItem
+              title="ترقية للمستوى التالي"
+              subtitle={
+                profile.level?.track === "preparatory" && profile.level.order === 6
+                  ? "من تمهيدي سادس إلى مطور أول"
+                  : `المستوى الحالي: ${profile.levelShortName}`
+              }
+              leadingIcon="arrow-up-bold-circle-outline"
+              onPress={() => promoteMutation.mutate()}
+              trailing={promoteMutation.isPending ? <Text variant="caption">…</Text> : undefined}
+              divider
+            />
+          ) : null}
+          {status !== "suspended" && !openTransfer ? (
+            <ListItem
+              title="طلب نقل إلى مركز آخر"
+              subtitle="يُرسل للمركز الجديد للقبول"
+              leadingIcon="swap-horizontal"
+              leadingTone="info"
+              onPress={() => {
+                setTransferCenterId(null);
+                setDialog("transfer");
+              }}
+              divider
+            />
+          ) : null}
+          {status === "enrolled" ? (
+            <ListItem
+              title="تعيين كخريجة"
+              subtitle="عند إتمام المسار"
+              leadingIcon="school-outline"
+              leadingTone="accent"
+              onPress={() => setDialog("graduate")}
+              divider
+            />
+          ) : null}
+          {status === "enrolled" ? (
+            <ListItem
+              title="وقف القيد"
+              subtitle="تتوقف الطالبة عن الدخول للتطبيق"
+              leadingIcon="account-cancel-outline"
+              destructive
+              onPress={() => setDialog("suspend")}
+            />
+          ) : (
+            <ListItem
+              title="إعادة القيد"
+              subtitle={status === "graduated" ? "لمسار جديد أو إعادة دراسة" : "إعادة تفعيل الطالبة"}
+              leadingIcon="account-reactivate-outline"
+              leadingTone="success"
+              onPress={() => {
+                setReinstateLevelId(null);
+                setDialog("reinstate");
+              }}
+            />
+          )}
+        </Card>
+      </Section>
 
-            <View style={styles.sectionCard}>
-              <View style={styles.attendanceHeader}>
-                <View style={styles.attendanceTitleRow}>
-                  <MaterialCommunityIcons name="calendar-month" size={22} color={PROFILE_HEADER} />
-                  <Text style={styles.sectionTitle}>سجل الحضور</Text>
-                </View>
-                <Text style={styles.attendancePercent}>
-                  {attendancePercent == null ? "—" : `${attendancePercent}%`}
-                </Text>
-              </View>
-              {hasAttendance ? (
-                <>
-                  <View style={styles.calendarGrid}>
-                    {WEEK_DAYS.map((d) => (
-                      <View key={d} style={styles.calendarDayHeader}>
-                        <Text style={styles.calendarDayText}>{d}</Text>
-                      </View>
-                    ))}
+      <Section title="البيانات الشخصية" action={{ label: "تعديل", icon: "pencil-outline", onPress: () => router.push(`/main/student-edit/${studentId}` as Href) }}>
+        <Card padding={4} style={styles.infoCard}>
+          <InfoRow label="الرقم المدني" value={profile.idNumber} icon="card-account-details-outline" selectable />
+          <InfoRow label="الهاتف" value={formatPhone(profile.phone)} icon="phone-outline" selectable />
+          <InfoRow label="تاريخ الميلاد" value={formatDateLong(profile.dob)} icon="cake-variant-outline" />
+          <InfoRow label="الجنسية" value={nationalityLabel(profile.nationality)} icon="flag-outline" />
+          <InfoRow label="المؤهل الدراسي" value={academicLevelLabel(profile.academicLevel)} icon="school-outline" />
+          <InfoRow label="الوظيفة الحالية" value={occupationLabel(profile.occupation, profile.occupationOther)} icon="briefcase-outline" />
+          <InfoRow label="عنوان السكن" value={formatAddress(profile.homeAddress)} icon="home-outline" />
+          <InfoRow
+            label="المسار"
+            value={[TRACK_LABELS[profile.track], profile.trackNote].filter(Boolean).join(" — ")}
+            icon="map-marker-path"
+          />
+          <InfoRow
+            label="الدورات"
+            value={profile.courses.map((c) => c.name).filter(Boolean).join("، ")}
+            icon="certificate-outline"
+            last
+          />
+        </Card>
+      </Section>
+
+      <Section title="الملاحظات" action={{ label: profile.notes ? "تعديل" : "إضافة", icon: "pencil-outline", onPress: () => setDialog("notes") }}>
+        <Card padding={4} tone={profile.notes ? "accent" : "surface"}>
+          <Text variant="body" color={profile.notes ? "text" : "textMuted"}>
+            {profile.notes || "لا توجد ملاحظات — أضيفي ما يفيد المعلمات (مقدار الحفظ، ظروف خاصة…)"}
+          </Text>
+        </Card>
+      </Section>
+
+      <Section title="المرفقات">
+        <DocumentViewer documents={profile.documents} />
+      </Section>
+
+      <Section title="سجل الحضور" subtitle="آخر 30 يوماً">
+        <Card padding={4}>
+          {calendar.some((d) => d.status) ? (
+            <AttendanceCalendar days={calendar} />
+          ) : (
+            <EmptyState compact icon="calendar-blank-outline" title="لا يوجد تحضير بعد" description="يُسجَّل الحضور من شاشة المادة أو الحصة" />
+          )}
+        </Card>
+      </Section>
+
+      <Section title="الدرجات">
+        <Card padding={0} style={styles.listCard}>
+          {grades.length === 0 ? (
+            <EmptyState compact icon="clipboard-text-outline" title="لا توجد درجات مرصودة" />
+          ) : (
+            grades.map((g, i) => (
+              <ListItem
+                key={`${g.levelId}-${g.subjectIndex}`}
+                title={subjectName(g.subjectIndex)}
+                subtitle={`حضور ${g.breakdown.attendance} · قصير ${g.breakdown.shortExam} · مشاركة ${g.breakdown.participation} · نهائي ${g.breakdown.final}`}
+                trailing={
+                  <View style={styles.gradeTrail}>
+                    <Text variant="headline" tabular>
+                      {String(g.total)}
+                    </Text>
+                    <Badge label={g.label} tone={g.total >= 90 ? "accent" : g.total >= 60 ? "success" : "danger"} size="sm" />
                   </View>
-                  <View style={styles.calendarGrid}>
-                    {calendar.map((day) => {
-                      const dayNum = day.date.split("-")[2] ?? "";
-                      return (
-                        <View
-                          key={day.date}
-                          style={[
-                            styles.calendarCell,
-                            { backgroundColor: getCalendarCellColor(day.status) },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.calendarCellText,
-                              day.status != null && styles.calendarCellTextActive,
-                            ]}
-                          >
-                            {dayNum}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  <Text style={styles.calendarHint}>آخر 30 يوماً</Text>
-                </>
-              ) : (
-                <Text style={styles.placeholderText}>
-                  لا يوجد سجل حضور بعد — سجّلي التحضير من شاشة المادة
-                </Text>
-              )}
-            </View>
+                }
+                chevron={false}
+                divider={i < grades.length - 1}
+              />
+            ))
+          )}
+        </Card>
+      </Section>
 
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionTitleRow}>
-                  <Text style={styles.gradesEmoji}>📝</Text>
-                  <Text style={styles.sectionTitle}>الدرجات الدراسية</Text>
+      {profile.enrollmentHistory.length ? (
+        <Section title="سجل القيد">
+          <Card padding={4} style={styles.timeline}>
+            {profile.enrollmentHistory.map((event, i) => (
+              <View key={`${event.action}-${event.at}-${i}`} style={styles.timelineItem}>
+                <View style={styles.timelineDot} />
+                <View style={styles.flex}>
+                  <Text variant="bodyStrong">{ENROLLMENT_ACTION_LABELS[event.action] ?? event.action}</Text>
+                  {event.reason ? (
+                    <Text variant="caption" color="textSecondary">
+                      {event.reason}
+                    </Text>
+                  ) : null}
                 </View>
-                <MaterialCommunityIcons name="chevron-down" size={20} color={centerColors.text} />
-              </View>
-              {hasGrades ? (
-                <View style={styles.gradesList}>
-                  {grades.map((grade) => {
-                    const labelInfo = getGradeLabelInfo(grade.total);
-                    return (
-                      <View key={`${grade.subjectIndex}-${grade.levelId}`} style={styles.gradeRow}>
-                        <View style={styles.gradeRowMain}>
-                          <Text style={styles.gradeSubject}>
-                            {getSubjectName(grade.subjectIndex)}
-                          </Text>
-                          <Text style={styles.gradeTotal}>{grade.total}</Text>
-                        </View>
-                        <View
-                          style={[styles.gradeBadge, { backgroundColor: labelInfo.bg }]}
-                        >
-                          <Text style={[styles.gradeBadgeText, { color: labelInfo.text }]}>
-                            {grade.label}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              ) : (
-                <Text style={styles.placeholderText}>
-                  لا توجد درجات مسجّلة بعد — سجّلي الدرجات من شاشة المادة
+                <Text variant="micro" color="textMuted">
+                  {event.at ? formatDateShort(event.at) : ""}
                 </Text>
-              )}
-            </View>
-          </>
-        ) : null}
-      </ScrollView>
-    </SafeAreaView>
+              </View>
+            ))}
+          </Card>
+        </Section>
+      ) : null}
+
+      {/* النوافذ */}
+      <PromptSheet
+        visible={dialog === "suspend"}
+        onClose={() => setDialog(null)}
+        title="وقف قيد الطالبة"
+        message={`لن تتمكن ${profile.fullName} من تسجيل الدخول حتى إعادة القيد. يُحفظ السبب في سجلها.`}
+        inputLabel="سبب وقف القيد"
+        confirmLabel="وقف القيد"
+        confirmVariant="danger"
+        loading={suspendMutation.isPending}
+        onConfirm={(reason) => suspendMutation.mutate(reason)}
+      />
+      <PromptSheet
+        visible={dialog === "reinstate"}
+        onClose={() => setDialog(null)}
+        title="إعادة القيد"
+        message="تعود الطالبة مسجّلة ويمكنها الدخول مجدداً."
+        inputLabel="ملاحظة (اختياري)"
+        required={false}
+        confirmLabel="إعادة القيد"
+        confirmVariant="primary"
+        loading={reinstateMutation.isPending}
+        onConfirm={(reason) => reinstateMutation.mutate(reason)}
+      >
+        <SelectField
+          label="المستوى عند العودة"
+          options={[
+            { id: "", label: `كما هو (${profile.levelShortName || "بدون مستوى"})` },
+            ...(levelsQuery.data ?? []).map((l) => ({ id: l.id, label: l.shortName })),
+          ]}
+          value={reinstateLevelId ?? ""}
+          onChange={(v) => setReinstateLevelId(v || null)}
+        />
+      </PromptSheet>
+      <PromptSheet
+        visible={dialog === "graduate"}
+        onClose={() => setDialog(null)}
+        title="تعيين كخريجة"
+        inputLabel="ملاحظة (اختياري)"
+        required={false}
+        confirmLabel="تأكيد التخرج"
+        loading={graduateMutation.isPending}
+        onConfirm={(reason) => graduateMutation.mutate(reason)}
+      />
+      <PromptSheet
+        visible={dialog === "transfer"}
+        onClose={() => setDialog(null)}
+        title="نقل إلى مركز آخر"
+        message="يُرسل الطلب للمركز الجديد، وتنتقل الطالبة بعد قبوله مع حفظ سجلها الأكاديمي."
+        inputLabel="سبب النقل"
+        required={false}
+        confirmLabel="إرسال طلب النقل"
+        loading={transferMutation.isPending}
+        onConfirm={(reason) => {
+          if (!transferCenterId) {
+            toast.error("اختاري المركز الجديد");
+            return;
+          }
+          transferMutation.mutate(reason);
+        }}
+      >
+        <SelectField
+          label="المركز الجديد"
+          required
+          options={(centersQuery.data ?? [])
+            .filter((c) => c.id !== centerId)
+            .map((c) => ({ id: c.id, label: c.nameAr, description: c.city }))}
+          value={transferCenterId}
+          onChange={setTransferCenterId}
+          placeholder={centersQuery.isLoading ? "جاري التحميل…" : "اختاري المركز"}
+          emptyText="لا توجد مراكز أخرى متاحة"
+        />
+      </PromptSheet>
+      <PromptSheet
+        visible={dialog === "notes"}
+        onClose={() => setDialog(null)}
+        title="ملاحظات الطالبة"
+        inputLabel="الملاحظات"
+        required={false}
+        initialValue={profile.notes}
+        confirmLabel="حفظ"
+        loading={notesMutation.isPending}
+        onConfirm={(notes) => notesMutation.mutate(notes)}
+      />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: centerColors.surfaceMuted,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: spacing.xxl * 2,
-  },
-  header: {
-    backgroundColor: PROFILE_HEADER,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
-    paddingHorizontal: spacing.lg,
-    alignItems: "center",
-  },
-  backBtn: {
-    position: "absolute",
-    top: spacing.lg,
-    left: spacing.lg,
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: centerColors.textOnAccent,
-    marginBottom: spacing.lg,
-  },
-  loader: {
-    marginVertical: spacing.xl,
-  },
-  errorBox: {
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingVertical: spacing.lg,
-  },
-  errorText: {
-    fontSize: 14,
-    color: centerColors.textOnAccent,
-    textAlign: "center",
-  },
-  retryText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.textOnAccent,
-    textDecorationLine: "underline",
-  },
-  avatarWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.md,
-  },
-  avatarEmoji: {
-    fontSize: 40,
-  },
-  studentName: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: centerColors.textOnAccent,
-    marginBottom: spacing.md,
-    textAlign: "center",
-  },
-  badgesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: spacing.sm,
-  },
-  badge: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-  },
-  badgeCourse: {
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  badgeActive: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: centerColors.accentGreen,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: centerColors.textOnAccent,
-  },
-  badgeTextActive: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: centerColors.textOnAccent,
-  },
-  kpiCard: {
-    flexDirection: "row",
-    backgroundColor: centerColors.cardBg,
-    marginHorizontal: spacing.lg,
-    marginTop: -spacing.xl,
-    borderRadius: 16,
-    padding: spacing.xl,
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8 },
-      android: { elevation: 4 },
-    }),
-  },
-  kpiItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-  kpiValueRed: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: centerColors.accentRed,
-  },
-  kpiValueOrange: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: centerColors.accentOrange,
-  },
-  kpiValueGreen: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: centerColors.accentGreen,
-  },
-  kpiLabel: {
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    marginTop: 4,
-  },
-  actionsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  actionBtn: {
-    flex: 1,
-    minWidth: "45%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    paddingVertical: spacing.lg,
-    borderRadius: 12,
-  },
-  actionBtnBlue: {
-    backgroundColor: "#e8f5fd",
-  },
-  actionBtnDark: {
-    backgroundColor: PROFILE_HEADER,
-  },
-  actionBtnRed: {
-    backgroundColor: "#fee2e2",
-  },
-  actionBtnGreen: {
-    backgroundColor: centerColors.accentGreen,
-  },
-  actionBtnTextBlue: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.accent,
-  },
-  actionBtnTextWhite: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.textOnAccent,
-  },
-  actionBtnTextRed: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.accentRed,
-  },
-  sectionCard: {
-    backgroundColor: centerColors.cardBg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    borderRadius: 16,
-    padding: spacing.lg,
-    overflow: "hidden",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4 },
-      android: { elevation: 3 },
-    }),
-  },
-  enrollmentRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    justifyContent: "flex-end",
-    marginTop: spacing.sm,
-  },
-  enrollmentChip: {
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 20,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  enrollmentChipOn: {
-    backgroundColor: centerColors.accent,
-    borderColor: centerColors.accent,
-  },
-  enrollmentChipText: {
-    fontSize: 13,
-    color: centerColors.text,
-  },
-  enrollmentChipTextOn: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-  mutorHint: {
-    fontSize: 13,
-    color: centerColors.textMuted,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-    textAlign: "right",
-    writingDirection: "rtl",
-  },
-  promoteBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    backgroundColor: PROFILE_HEADER,
-    borderRadius: 12,
-    paddingVertical: spacing.md,
-    marginTop: spacing.xs,
-  },
-  promoteBtnDisabled: {
-    opacity: 0.45,
-  },
-  promoteBtnText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.textOnAccent,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  sectionTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: centerColors.text,
-  },
-  editLink: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.accent,
-  },
-  dataRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: centerColors.cardBorder,
-  },
-  dataRowLast: {
-    borderBottomWidth: 0,
-  },
-  dataLabel: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-  },
-  dataValue: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.text,
-  },
-  attendanceHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  attendanceTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  attendancePercent: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: PROFILE_HEADER,
-  },
-  calendarGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  calendarDayHeader: {
-    width: "14.28%",
-    aspectRatio: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 2,
-  },
-  calendarDayText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: centerColors.textSecondary,
-  },
-  calendarCell: {
-    width: "14.28%",
-    aspectRatio: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
-    borderRadius: 6,
-  },
-  calendarCellText: {
-    fontSize: 11,
-    color: centerColors.textSecondary,
-    fontWeight: "600",
-  },
-  calendarCellTextActive: {
-    color: centerColors.textOnAccent,
-  },
-  calendarHint: {
-    fontSize: 12,
-    color: centerColors.textMuted,
-    textAlign: "center",
-    marginTop: spacing.sm,
-  },
-  placeholderText: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-    paddingVertical: spacing.md,
-  },
-  gradesEmoji: {
-    fontSize: 18,
-  },
-  gradesList: {
-    gap: spacing.sm,
-  },
-  gradeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: centerColors.cardBorder,
-  },
-  gradeRowMain: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingRight: spacing.sm,
-  },
-  gradeSubject: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: centerColors.text,
-  },
-  gradeTotal: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: centerColors.accent,
-  },
-  gradeBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  gradeBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  flex: { flex: 1 },
+  hero: { alignItems: "center", gap: space[3] },
+  badges: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: space[2] },
+  contactRow: { flexDirection: "row", gap: space[2], marginTop: space[1] },
+  spacer: { marginTop: space[4] },
+  bannerAction: { alignSelf: "flex-start", marginTop: space[1], paddingHorizontal: 0 },
+  stats: { flexDirection: "row", gap: space[3], marginTop: space[4] },
+  listCard: { overflow: "hidden" },
+  infoCard: { paddingVertical: space[1] },
+  gradeTrail: { alignItems: "center", gap: 2 },
+  timeline: { gap: space[4] },
+  timelineItem: { flexDirection: "row", gap: space[3], alignItems: "flex-start" },
+  timelineDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary, marginTop: 7 },
 });

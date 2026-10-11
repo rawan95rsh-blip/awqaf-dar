@@ -1,0 +1,6 @@
+{
+  "CFBundleDisplayName": "دور القرآن",
+  "NSCameraUsageDescription": "لتصوير البطاقة المدنية والمؤهل الدراسي عند التسجيل",
+  "NSPhotoLibraryUsageDescription": "لاختيار صور المرفقات (البطاقة المدنية، الصورة الشخصية، المؤهل)",
+  "NSFaceIDUsageDescription": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور"
+}

@@ -9,49 +9,69 @@ import { sendError, sendSuccess } from '../utils/response';
 import {
   formatStudentListItem,
   formatStudentProfile,
+  STUDENT_POPULATE,
   type StudentWithLevel,
 } from '../utils/studentFormat';
-import { getStudentStats, getStudentsStatsMap } from '../utils/studentStats';
+import { getStudentStats, getStudentsStatsMap, type StudentStatusValue } from '../utils/studentStats';
 import { canAccessStudentRecord, getCenterIdForStudentAccess } from '../utils/studentAccess';
 import { ACTIVE_STUDENT_FILTER } from '../utils/studentActive';
+import { isDigitsOnlyPassword, PASSWORD_DIGITS_ERROR_AR } from '../utils/password';
+import { isStudentType } from '../constants/registration';
+import { isStudentTrack, type StudentTrack } from '../constants/tracks';
+import { findNextLevel } from '../utils/centerLevels';
+import { isEnrollmentStatus, type EnrollmentAction, type EnrollmentStatus } from '../constants/enrollment';
 import {
-  isDigitsOnlyPassword,
-  PASSWORD_DIGITS_ERROR_AR,
-} from '../utils/password';
-import {
-  isValidAcademicLevel,
-  isValidNationality,
-} from '../constants/registration';
-import { isStudentGender } from '../constants/genderAudience';
-import { isClassTrack } from '../constants/classOffers';
-import {
-  MUTOR_LEVEL_ORDER_MAX,
-  PREPARATORY_LEVEL_ORDER,
-} from '../utils/centerLevels';
-import {
-  isKuwaitCivilId,
-  KUWAIT_CIVIL_ID_ERROR_AR,
-  KUWAIT_CIVIL_ID_LABEL_AR,
-  normalizeIdNumber,
-} from '../utils/idNumber';
-import {
-  isEnrollmentStatus,
-  type EnrollmentStatus,
-} from '../constants/enrollment';
+  parseStudentInput,
+  resolvePlacement,
+  storeUploadedDocuments,
+  type StudentInput,
+} from '../utils/studentInput';
+import { deleteFileSafe } from '../utils/fileStorage';
+import { DOCUMENT_KINDS } from '../models/shared';
+import { escapeRegex, optionalTrimmed, paramId } from '../utils/validation';
+import { notifyUsers } from '../services/pushService';
 
-function normalizePhone(phone: string): string {
-  return phone.trim().replace(/\s/g, '');
+const STATUS_FILTERS: StudentStatusValue[] = ['regular', 'frequent_absence', 'warning', 'excellent'];
+
+function historyEvent(
+  action: EnrollmentAction,
+  by: mongoose.Types.ObjectId | undefined,
+  reason = '',
+  meta: Record<string, unknown> = {}
+) {
+  return { action, reason, meta, by: by ?? null, at: new Date() };
 }
 
-function parseDob(dob: unknown): Date | null {
-  if (typeof dob !== 'string' || !dob.trim()) {
+async function loadProfile(studentId: mongoose.Types.ObjectId, centerId: mongoose.Types.ObjectId) {
+  const populated = await Student.findById(studentId).populate(STUDENT_POPULATE).lean();
+  const stats = await getStudentStats(studentId, centerId);
+  const center = await Center.findById(centerId).select('nameAr').lean();
+  const centerSummary = center ? { id: center._id.toString(), nameAr: center.nameAr } : null;
+  return populated
+    ? formatStudentProfile(populated as unknown as StudentWithLevel, stats, centerSummary)
+    : null;
+}
+
+async function findCenterStudent(req: Request, res: Response) {
+  if (!req.user?.centerId || req.user.role !== 'center_admin') {
+    sendError(res, 'غير مصرح', 403);
     return null;
   }
-  const parsed = new Date(dob);
-  if (Number.isNaN(parsed.getTime())) {
+  const id = paramId(req.params.id);
+  if (!mongoose.isValidObjectId(id)) {
+    sendError(res, 'معرّف الطالبة غير صالح', 400);
     return null;
   }
-  return parsed;
+  const student = await Student.findOne({
+    _id: id,
+    centerId: req.user.centerId,
+    ...ACTIVE_STUDENT_FILTER,
+  });
+  if (!student) {
+    sendError(res, 'لم يُعثر على الطالبة', 404);
+    return null;
+  }
+  return student;
 }
 
 export async function createStudent(req: Request, res: Response): Promise<void> {
@@ -60,159 +80,78 @@ export async function createStudent(req: Request, res: Response): Promise<void> 
       sendError(res, 'غير مصرح', 403);
       return;
     }
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
-    const {
-      fullName,
-      idNumber,
-      gender,
-      nationality,
-      academicLevel,
-      track,
-      phone,
-      password,
-      dob,
-      levelId,
-    } = req.body as {
-      fullName?: string;
-      idNumber?: string;
-      gender?: string;
-      nationality?: string;
-      academicLevel?: string;
-      track?: string;
-      phone?: string;
-      password?: string;
-      dob?: string;
-      levelId?: string;
-    };
-
-    if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
-      sendError(res, 'الاسم الكامل مطلوب', 400);
+    // الإضافة اليدوية من المشرفة: الحقول الإضافية اختيارية
+    const parsed = parseStudentInput(
+      { studentType: 'new', ...body },
+      { requireExtended: false }
+    );
+    if (!parsed.ok) {
+      sendError(res, parsed.error, 400);
       return;
     }
+    const input = parsed.value as StudentInput;
 
-    if (!idNumber || typeof idNumber !== 'string') {
-      sendError(res, `${KUWAIT_CIVIL_ID_LABEL_AR} مطلوب`, 400);
-      return;
-    }
-
-    const normalizedIdNumber = normalizeIdNumber(idNumber);
-    if (!isKuwaitCivilId(normalizedIdNumber)) {
-      sendError(res, KUWAIT_CIVIL_ID_ERROR_AR, 400);
-      return;
-    }
-
-    if (!isStudentGender(gender)) {
-      sendError(res, 'الجنس مطلوب — اختاري ذكر أو أنثى', 400);
-      return;
-    }
-
-    if (!nationality || typeof nationality !== 'string' || !isValidNationality(nationality)) {
-      sendError(res, 'الجنسية غير صالحة', 400);
-      return;
-    }
-
-    if (
-      !academicLevel ||
-      typeof academicLevel !== 'string' ||
-      !isValidAcademicLevel(academicLevel)
-    ) {
-      sendError(res, 'المستوى الدراسي غير صالح', 400);
-      return;
-    }
-
-    const resolvedTrack =
-      track && typeof track === 'string' && isClassTrack(track) ? track : 'mutor';
-
-    if (!phone || typeof phone !== 'string') {
-      sendError(res, 'رقم الهاتف مطلوب', 400);
-      return;
-    }
-
-    const normalizedPhone = normalizePhone(phone);
-    if (!/^\d{10}$/.test(normalizedPhone)) {
-      sendError(res, 'رقم الهاتف يجب أن يكون 10 أرقام', 400);
-      return;
-    }
-
-    if (!password || typeof password !== 'string') {
-      sendError(res, 'كلمة المرور مطلوبة', 400);
-      return;
-    }
-
-    if (!isDigitsOnlyPassword(password)) {
+    const password = body.password;
+    if (typeof password !== 'string' || !isDigitsOnlyPassword(password)) {
       sendError(res, PASSWORD_DIGITS_ERROR_AR, 400);
       return;
     }
 
-    const parsedDob = parseDob(dob);
-    if (!parsedDob) {
-      sendError(res, 'تاريخ الميلاد غير صالح', 400);
+    const placement = await resolvePlacement(req.user.centerId, input.track, input.levelId, input.courseIds);
+    if (!placement.ok) {
+      sendError(res, placement.error, 400);
       return;
     }
 
-    const existingActive = await Student.findOne({
-      idNumber: normalizedIdNumber,
-      ...ACTIVE_STUDENT_FILTER,
-    });
+    const existingActive = await Student.findOne({ idNumber: input.idNumber, ...ACTIVE_STUDENT_FILTER });
     if (existingActive) {
-      sendError(res, 'رقم الهوية المدنية مسجل مسبقاً في مركز نشط', 409);
+      sendError(res, 'الرقم المدني مسجل مسبقاً في مركز', 409);
       return;
     }
 
-    const existingUser = await User.findOne({ phone: normalizedPhone });
+    const existingUser = await User.findOne({ phone: input.phone });
     if (existingUser) {
       sendError(res, 'رقم الهاتف مسجل مسبقاً', 409);
       return;
     }
 
-    let level;
-    if (levelId && typeof levelId === 'string') {
-      if (!mongoose.isValidObjectId(levelId)) {
-        sendError(res, 'معرّف المستوى غير صالح', 400);
-        return;
-      }
-      level = await Level.findOne({
-        _id: levelId,
-        centerId: req.user.centerId,
-      });
-      if (!level) {
-        sendError(res, 'المستوى غير موجود في هذا المركز', 400);
-        return;
-      }
-    } else {
-      level = await Level.findOne({
-        centerId: req.user.centerId,
-        order: PREPARATORY_LEVEL_ORDER,
-      });
-      if (!level) {
-        sendError(
-          res,
-          'المستوى التمهيدي غير متوفر — أنشئي المستويات الافتراضية أولاً',
-          400
-        );
-        return;
-      }
-    }
+    const studentId = new mongoose.Types.ObjectId();
+    const documents = await storeUploadedDocuments(req, {
+      centerId: req.user.centerId.toString(),
+      studentId: studentId.toString(),
+    });
 
     const passwordHash = await bcrypt.hash(password, 10);
 
     const student = await Student.create({
-      fullName: fullName.trim(),
-      idNumber: normalizedIdNumber,
-      gender,
-      nationality,
-      academicLevel,
-      track: resolvedTrack,
-      phone: normalizedPhone,
-      dob: parsedDob,
-      levelId: level._id,
+      _id: studentId,
+      fullName: input.fullName,
+      idNumber: input.idNumber,
+      gender: input.gender,
+      nationality: input.nationality,
+      academicLevel: input.academicLevel,
+      track: input.track,
+      trackNote: input.trackNote ?? '',
+      phone: input.phone,
+      dob: input.dob,
+      levelId: placement.value.levelId,
+      courseIds: placement.value.courseIds,
       centerId: req.user.centerId,
+      occupation: input.occupation ?? null,
+      occupationOther: input.occupationOther ?? '',
+      studentType: input.studentType ?? 'new',
+      homeAddress: input.homeAddress ?? {},
+      notes: input.notes ?? '',
+      documents,
       deletedAt: null,
       enrollmentStatus: 'enrolled',
+      enrollmentHistory: [historyEvent('registered', req.user._id)],
     });
 
     const user = await User.create({
-      phone: normalizedPhone,
+      phone: input.phone,
       passwordHash,
       role: 'student',
       centerId: req.user.centerId,
@@ -220,19 +159,10 @@ export async function createStudent(req: Request, res: Response): Promise<void> 
       isActive: true,
     });
 
-    const populated = await Student.findById(student._id)
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
-      .lean();
-
+    const profile = await loadProfile(student._id, req.user.centerId);
     sendSuccess(
       res,
-      {
-        ...(populated
-          ? formatStudentListItem(populated as StudentWithLevel)
-          : { id: student._id.toString() }),
-        userId: user._id.toString(),
-        message: 'تم إنشاء الطالبة بنجاح',
-      },
+      { ...(profile ?? { id: student._id.toString() }), userId: user._id.toString(), message: 'تمت إضافة الطالبة بنجاح' },
       201
     );
   } catch (err) {
@@ -248,30 +178,13 @@ export async function listStudents(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const search =
-      typeof req.query.search === 'string' && req.query.search.trim()
-        ? req.query.search.trim()
-        : '';
-    const levelId =
-      typeof req.query.levelId === 'string' && req.query.levelId.trim()
-        ? req.query.levelId.trim()
-        : '';
-
-    if (levelId && !mongoose.isValidObjectId(levelId)) {
-      sendError(res, 'معرّف المستوى غير صالح', 400);
-      return;
-    }
-
-    if (levelId) {
-      const level = await Level.findOne({
-        _id: levelId,
-        centerId: req.user.centerId,
-      });
-      if (!level) {
-        sendError(res, 'المستوى غير موجود في هذا المركز', 404);
-        return;
-      }
-    }
+    const q = req.query as Record<string, unknown>;
+    const search = typeof q.search === 'string' ? q.search.trim() : '';
+    const levelId = typeof q.levelId === 'string' ? q.levelId.trim() : '';
+    const track = typeof q.track === 'string' ? q.track.trim() : '';
+    const enrollmentStatus = typeof q.enrollmentStatus === 'string' ? q.enrollmentStatus.trim() : '';
+    const studentType = typeof q.studentType === 'string' ? q.studentType.trim() : '';
+    const status = typeof q.status === 'string' ? q.status.trim() : '';
 
     const filter: Record<string, unknown> = {
       centerId: req.user.centerId,
@@ -279,34 +192,64 @@ export async function listStudents(req: Request, res: Response): Promise<void> {
     };
 
     if (levelId) {
+      if (!mongoose.isValidObjectId(levelId)) {
+        sendError(res, 'معرّف المستوى غير صالح', 400);
+        return;
+      }
       filter.levelId = levelId;
     }
-
+    if (track) {
+      if (!isStudentTrack(track)) {
+        sendError(res, 'المسار غير صالح', 400);
+        return;
+      }
+      filter.track = track;
+    }
+    if (enrollmentStatus) {
+      if (!isEnrollmentStatus(enrollmentStatus)) {
+        sendError(res, 'حالة القيد غير صالحة', 400);
+        return;
+      }
+      filter.enrollmentStatus = enrollmentStatus;
+    }
+    if (studentType) {
+      if (!isStudentType(studentType)) {
+        sendError(res, 'نوع الطالبة غير صالح', 400);
+        return;
+      }
+      filter.studentType = studentType;
+    }
     if (search) {
-      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escaped = escapeRegex(search);
       filter.$or = [
         { fullName: { $regex: escaped, $options: 'i' } },
         { idNumber: { $regex: escaped } },
+        { phone: { $regex: escaped } },
       ];
     }
 
     const students = await Student.find(filter)
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
+      .populate(STUDENT_POPULATE)
       .sort({ fullName: 1 })
       .lean();
 
-    const studentIds = students.map((student) => student._id);
-    const statsMap = await getStudentsStatsMap(studentIds, req.user.centerId);
+    const statsMap = await getStudentsStatsMap(
+      students.map((student) => student._id),
+      req.user.centerId
+    );
 
-    sendSuccess(
-      res,
-      students.map((student) =>
-        formatStudentListItem(
-          student as StudentWithLevel,
-          statsMap.get(student._id.toString())
-        )
+    let items = students.map((student) =>
+      formatStudentListItem(
+        student as unknown as StudentWithLevel,
+        statsMap.get(student._id.toString())
       )
     );
+
+    if (status && (STATUS_FILTERS as string[]).includes(status)) {
+      items = items.filter((item) => item.status === status);
+    }
+
+    sendSuccess(res, items);
   } catch (err) {
     console.error('[listStudents]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
@@ -324,26 +267,14 @@ export async function getCurrentStudent(req: Request, res: Response): Promise<vo
       _id: req.user.studentId,
       centerId: req.user.centerId,
       ...ACTIVE_STUDENT_FILTER,
-    })
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
-      .lean();
+    }).select('_id');
 
     if (!student) {
       sendError(res, 'لم يُعثر على بيانات الطالبة', 404);
       return;
     }
 
-    const stats = await getStudentStats(student._id, req.user.centerId);
-
-    const center = await Center.findById(req.user.centerId).select('nameAr').lean();
-    const centerSummary = center
-      ? { id: center._id.toString(), nameAr: center.nameAr }
-      : null;
-
-    sendSuccess(
-      res,
-      formatStudentProfile(student as StudentWithLevel, stats, centerSummary)
-    );
+    sendSuccess(res, await loadProfile(student._id, req.user.centerId));
   } catch (err) {
     console.error('[getCurrentStudent]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
@@ -358,7 +289,7 @@ export async function getStudentById(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const { id } = req.params;
+    const id = paramId(req.params.id);
     if (!mongoose.isValidObjectId(id)) {
       sendError(res, 'معرّف الطالبة غير صالح', 400);
       return;
@@ -373,88 +304,231 @@ export async function getStudentById(req: Request, res: Response): Promise<void>
       _id: id,
       centerId,
       ...ACTIVE_STUDENT_FILTER,
-    })
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
-      .lean();
+    }).select('_id');
 
     if (!student) {
       sendError(res, 'لم يُعثر على الطالبة', 404);
       return;
     }
 
-    const stats = await getStudentStats(
-      student._id,
-      new mongoose.Types.ObjectId(centerId)
-    );
-
-    const center = await Center.findById(centerId).select('nameAr').lean();
-    const centerSummary = center
-      ? { id: center._id.toString(), nameAr: center.nameAr }
-      : null;
-
-    sendSuccess(
-      res,
-      formatStudentProfile(student as StudentWithLevel, stats, centerSummary)
-    );
+    sendSuccess(res, await loadProfile(student._id, new mongoose.Types.ObjectId(centerId)));
   } catch (err) {
     console.error('[getStudentById]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
   }
 }
 
-export async function updateStudentEnrollmentStatus(
-  req: Request,
-  res: Response
-): Promise<void> {
+/** تعديل بيانات الطالبة (المشرفة) — بما فيها الملاحظات والمسار والمستوى */
+export async function updateStudent(req: Request, res: Response): Promise<void> {
   try {
-    if (!req.user?.centerId || req.user.role !== 'center_admin') {
-      sendError(res, 'غير مصرح', 403);
+    const student = await findCenterStudent(req, res);
+    if (!student || !req.user?.centerId) return;
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const parsed = parseStudentInput(body, { partial: true, requireExtended: false });
+    if (!parsed.ok) {
+      sendError(res, parsed.error, 400);
       return;
     }
+    const input = parsed.value;
 
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      sendError(res, 'معرّف الطالبة غير صالح', 400);
-      return;
+    if (input.idNumber && input.idNumber !== student.idNumber) {
+      const duplicate = await Student.findOne({
+        idNumber: input.idNumber,
+        _id: { $ne: student._id },
+        ...ACTIVE_STUDENT_FILTER,
+      });
+      if (duplicate) {
+        sendError(res, 'الرقم المدني مسجل لطالبة أخرى', 409);
+        return;
+      }
+      student.idNumber = input.idNumber;
     }
 
-    const { enrollmentStatus } = req.body as { enrollmentStatus?: string };
-    if (!enrollmentStatus || !isEnrollmentStatus(enrollmentStatus)) {
-      sendError(
-        res,
-        'حالة القيد غير صالحة — اختاري مسجّلة أو خريجة أو موقوف القيد',
-        400
+    if (input.phone && input.phone !== student.phone) {
+      const duplicateUser = await User.findOne({ phone: input.phone, studentId: { $ne: student._id } });
+      if (duplicateUser) {
+        sendError(res, 'رقم الهاتف مسجل لحساب آخر', 409);
+        return;
+      }
+      student.phone = input.phone;
+      await User.updateOne({ studentId: student._id, role: 'student' }, { $set: { phone: input.phone } });
+    }
+
+    const nextTrack = (input.track ?? student.track ?? 'mutor') as StudentTrack;
+    const trackOrPlacementChanged =
+      input.track !== undefined || input.levelId !== undefined || input.courseIds !== undefined;
+
+    if (trackOrPlacementChanged) {
+      const placement = await resolvePlacement(
+        req.user.centerId,
+        nextTrack,
+        input.levelId !== undefined ? input.levelId : student.levelId?.toString() ?? null,
+        input.courseIds ?? (student.courseIds ?? []).map((id) => id.toString())
       );
-      return;
+      if (!placement.ok) {
+        sendError(res, placement.error, 400);
+        return;
+      }
+      const previousLevel = student.levelId?.toString() ?? null;
+      const nextLevel = placement.value.levelId?.toString() ?? null;
+      if (previousLevel !== nextLevel) {
+        student.enrollmentHistory.push(
+          historyEvent('level_changed', req.user._id, '', { from: previousLevel, to: nextLevel })
+        );
+      }
+      student.track = nextTrack;
+      student.levelId = placement.value.levelId;
+      student.set('courseIds', placement.value.courseIds);
     }
 
-    const student = await Student.findOne({
-      _id: id,
-      centerId: req.user.centerId,
-      ...ACTIVE_STUDENT_FILTER,
+    if (input.fullName) student.fullName = input.fullName;
+    if (input.nationality) student.nationality = input.nationality;
+    if (input.academicLevel) student.academicLevel = input.academicLevel;
+    if (input.dob) student.dob = input.dob;
+    if (input.trackNote !== undefined) student.trackNote = input.trackNote;
+    if (input.occupation) {
+      student.occupation = input.occupation;
+      student.occupationOther = input.occupationOther ?? '';
+    }
+    if (input.studentType) student.studentType = input.studentType;
+    if (input.homeAddress) student.set('homeAddress', input.homeAddress);
+    if (input.notes !== undefined) student.notes = input.notes;
+
+    // مرفقات جديدة تستبدل القديمة
+    const uploaded = await storeUploadedDocuments(req, {
+      centerId: req.user.centerId.toString(),
+      studentId: student._id.toString(),
     });
-    if (!student) {
-      sendError(res, 'لم يُعثر على الطالبة', 404);
-      return;
+    for (const kind of DOCUMENT_KINDS) {
+      const newId = uploaded[kind];
+      if (!newId) continue;
+      const previous = student.documents?.[kind];
+      student.set(`documents.${kind}`, newId);
+      await deleteFileSafe(previous ?? null);
     }
 
-    student.enrollmentStatus = enrollmentStatus as EnrollmentStatus;
     await student.save();
 
-    const populated = await Student.findById(student._id)
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
-      .lean();
+    sendSuccess(res, {
+      ...(await loadProfile(student._id, req.user.centerId)),
+      message: 'تم حفظ بيانات الطالبة',
+    });
+  } catch (err) {
+    console.error('[updateStudent]', err);
+    sendError(res, 'حدث خطأ في الخادم', 500);
+  }
+}
 
-    const stats = await getStudentStats(student._id, req.user.centerId);
-    const center = await Center.findById(req.user.centerId).select('nameAr').lean();
-    const centerSummary = center
-      ? { id: center._id.toString(), nameAr: center.nameAr }
-      : null;
+/** وقف قيد الطالبة — مع سبب يُحفظ في السجل */
+export async function suspendStudent(req: Request, res: Response): Promise<void> {
+  try {
+    const student = await findCenterStudent(req, res);
+    if (!student || !req.user?.centerId) return;
+
+    const reason = optionalTrimmed(req.body?.reason, 500);
+    if (!reason) {
+      sendError(res, 'اكتبي سبب وقف القيد', 400);
+      return;
+    }
+    if (student.enrollmentStatus === 'suspended') {
+      sendError(res, 'قيد الطالبة موقوف مسبقاً', 409);
+      return;
+    }
+
+    student.enrollmentStatus = 'suspended';
+    student.enrollmentHistory.push(historyEvent('suspended', req.user._id, reason));
+    await student.save();
 
     sendSuccess(res, {
-      ...(populated
-        ? formatStudentProfile(populated as StudentWithLevel, stats, centerSummary)
-        : { id: student._id.toString(), enrollmentStatus }),
+      ...(await loadProfile(student._id, req.user.centerId)),
+      message: 'تم وقف قيد الطالبة',
+    });
+  } catch (err) {
+    console.error('[suspendStudent]', err);
+    sendError(res, 'حدث خطأ في الخادم', 500);
+  }
+}
+
+/** إعادة قيد طالبة موقوفة أو خريجة — يمكن اختيار مستوى جديد */
+export async function reinstateStudent(req: Request, res: Response): Promise<void> {
+  try {
+    const student = await findCenterStudent(req, res);
+    if (!student || !req.user?.centerId) return;
+
+    if (student.enrollmentStatus === 'enrolled') {
+      sendError(res, 'الطالبة مسجّلة حالياً', 409);
+      return;
+    }
+
+    const reason = optionalTrimmed(req.body?.reason, 500) ?? '';
+    const levelIdRaw = typeof req.body?.levelId === 'string' ? req.body.levelId.trim() : '';
+    if (levelIdRaw) {
+      if (!mongoose.isValidObjectId(levelIdRaw)) {
+        sendError(res, 'معرّف المستوى غير صالح', 400);
+        return;
+      }
+      const level = await Level.findOne({ _id: levelIdRaw, centerId: req.user.centerId });
+      if (!level) {
+        sendError(res, 'المستوى غير موجود في هذا المركز', 400);
+        return;
+      }
+      student.levelId = level._id;
+      student.track = (level.track ?? 'mutor') as StudentTrack;
+    }
+
+    student.enrollmentStatus = 'enrolled';
+    student.enrollmentHistory.push(
+      historyEvent('reinstated', req.user._id, reason, levelIdRaw ? { levelId: levelIdRaw } : {})
+    );
+    await student.save();
+
+    const user = await User.findOne({ studentId: student._id, role: 'student' }).select('_id');
+    if (user) {
+      await notifyUsers([user._id], {
+        type: 'enrollment_updated',
+        title: 'تمت إعادة قيدكِ',
+        body: 'أعاد المركز تفعيل قيدكِ — يمكنكِ متابعة دروسكِ الآن.',
+        centerId: req.user.centerId,
+        data: { studentId: student._id.toString() },
+      });
+    }
+
+    sendSuccess(res, {
+      ...(await loadProfile(student._id, req.user.centerId)),
+      message: 'تمت إعادة قيد الطالبة',
+    });
+  } catch (err) {
+    console.error('[reinstateStudent]', err);
+    sendError(res, 'حدث خطأ في الخادم', 500);
+  }
+}
+
+export async function updateStudentEnrollmentStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const student = await findCenterStudent(req, res);
+    if (!student || !req.user?.centerId) return;
+
+    const { enrollmentStatus, reason } = req.body as { enrollmentStatus?: string; reason?: string };
+    if (!isEnrollmentStatus(enrollmentStatus)) {
+      sendError(res, 'حالة القيد غير صالحة — مسجّلة أو خريجة أو موقوفة', 400);
+      return;
+    }
+
+    if (student.enrollmentStatus !== enrollmentStatus) {
+      const action: EnrollmentAction =
+        enrollmentStatus === 'graduated'
+          ? 'graduated'
+          : enrollmentStatus === 'suspended'
+            ? 'suspended'
+            : 'reinstated';
+      student.enrollmentStatus = enrollmentStatus as EnrollmentStatus;
+      student.enrollmentHistory.push(historyEvent(action, req.user._id, optionalTrimmed(reason) ?? ''));
+      await student.save();
+    }
+
+    sendSuccess(res, {
+      ...(await loadProfile(student._id, req.user.centerId)),
       message: 'تم تحديث حالة القيد',
     });
   } catch (err) {
@@ -463,85 +537,46 @@ export async function updateStudentEnrollmentStatus(
   }
 }
 
-/** ترقية يدوية لمسار المطور — المستوى التالي (ترم ≈ 3 أشهر؛ بدون أتمتة) */
+/** ترقية يدوية للمستوى التالي — تمهيدي سادس ← مطور أول */
 export async function promoteStudent(req: Request, res: Response): Promise<void> {
   try {
-    if (!req.user?.centerId || req.user.role !== 'center_admin') {
-      sendError(res, 'غير مصرح', 403);
-      return;
-    }
-
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      sendError(res, 'معرّف الطالبة غير صالح', 400);
-      return;
-    }
-
-    const student = await Student.findOne({
-      _id: id,
-      centerId: req.user.centerId,
-      ...ACTIVE_STUDENT_FILTER,
-    });
-    if (!student) {
-      sendError(res, 'لم يُعثر على الطالبة', 404);
-      return;
-    }
-
-    if ((student.track ?? 'mutor') !== 'mutor') {
-      sendError(res, 'الترقية للمستوى التالي متاحة لمسار المطور فقط', 400);
-      return;
-    }
+    const student = await findCenterStudent(req, res);
+    if (!student || !req.user?.centerId) return;
 
     if (student.enrollmentStatus !== 'enrolled') {
       sendError(res, 'لا يمكن ترقية طالبة غير مسجّلة حالياً', 400);
       return;
     }
+    if (!student.levelId) {
+      sendError(res, 'الطالبة غير مرتبطة بمستوى — عدّلي مسارها أولاً', 400);
+      return;
+    }
 
-    const currentLevel = await Level.findOne({
-      _id: student.levelId,
-      centerId: req.user.centerId,
-    });
+    const currentLevel = await Level.findOne({ _id: student.levelId, centerId: req.user.centerId });
     if (!currentLevel) {
       sendError(res, 'مستوى الطالبة غير موجود', 400);
       return;
     }
 
-    if (currentLevel.order >= MUTOR_LEVEL_ORDER_MAX) {
-      sendError(
-        res,
-        'الطالبة في أعلى مستوى مطور — عيّني حالة القيد إلى خريجة إن اكتمل المسار',
-        400
-      );
-      return;
-    }
-
-    const nextLevel = await Level.findOne({
-      centerId: req.user.centerId,
-      order: currentLevel.order + 1,
-    });
+    const nextLevel = await findNextLevel(req.user.centerId, currentLevel);
     if (!nextLevel) {
-      sendError(res, 'المستوى التالي غير متوفر في المركز', 400);
+      sendError(res, 'الطالبة في أعلى مستوى مطور — يمكن تعيينها خريجة', 400);
       return;
     }
 
     student.levelId = nextLevel._id;
+    student.track = (nextLevel.track ?? 'mutor') as StudentTrack;
+    student.enrollmentHistory.push(
+      historyEvent('promoted', req.user._id, '', {
+        from: currentLevel.shortName || currentLevel.fullName,
+        to: nextLevel.shortName || nextLevel.fullName,
+      })
+    );
     await student.save();
 
-    const populated = await Student.findById(student._id)
-      .populate({ path: 'levelId', select: 'fullName shortName order' })
-      .lean();
-
-    const stats = await getStudentStats(student._id, req.user.centerId);
-    const center = await Center.findById(req.user.centerId).select('nameAr').lean();
-    const centerSummary = center
-      ? { id: center._id.toString(), nameAr: center.nameAr }
-      : null;
-
     sendSuccess(res, {
-      ...(populated
-        ? formatStudentProfile(populated as StudentWithLevel, stats, centerSummary)
-        : { id: student._id.toString(), levelId: nextLevel._id.toString() }),
-      message: `تمت الترقية إلى ${nextLevel.fullName}`,
+      ...(await loadProfile(student._id, req.user.centerId)),
+      message: `تمت الترقية إلى ${nextLevel.shortName || nextLevel.fullName}`,
     });
   } catch (err) {
     console.error('[promoteStudent]', err);

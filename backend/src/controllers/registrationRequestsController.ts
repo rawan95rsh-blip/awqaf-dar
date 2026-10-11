@@ -2,49 +2,29 @@ import type { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import mongoose from 'mongoose';
 import { Center } from '../models/Center';
-import { Level } from '../models/Level';
 import { RegistrationRequest } from '../models/RegistrationRequest';
 import { Student } from '../models/Student';
 import { User } from '../models/User';
+import { Level } from '../models/Level';
+import { Course } from '../models/Course';
 import { sendError, sendSuccess } from '../utils/response';
 import { notifyUsers } from '../services/pushService';
+import { isGenderCompatibleWithCenter } from '../constants/genderAudience';
+import { isStudentTrack, type StudentTrack } from '../constants/tracks';
+import { isDigitsOnlyPassword, PASSWORD_DIGITS_ERROR_AR } from '../utils/password';
+import { formatPhoneForDisplay } from '../utils/phone';
 import {
-  isValidAcademicLevel,
-  isValidNationality,
-} from '../constants/registration';
-import {
-  isGenderCompatibleWithCenter,
-  isStudentGender,
-} from '../constants/genderAudience';
-import { isClassTrack } from '../constants/classOffers';
-import {
-  isDigitsOnlyPassword,
-  PASSWORD_DIGITS_ERROR_AR,
-} from '../utils/password';
+  missingRequiredDocuments,
+  parseStudentInput,
+  resolvePlacement,
+  storeUploadedDocuments,
+  type StudentInput,
+} from '../utils/studentInput';
+import { deleteFileSafe, updateFilesMetadata } from '../utils/fileStorage';
+import { DOCUMENT_LABELS_AR } from '../models/shared';
+import { paramId } from '../utils/validation';
 
-import {
-  isKuwaitCivilId,
-  KUWAIT_CIVIL_ID_ERROR_AR,
-  KUWAIT_CIVIL_ID_LABEL_AR,
-  normalizeIdNumber,
-} from '../utils/idNumber';
-
-function normalizePhone(phone: string): string {
-  return phone.trim().replace(/\s/g, '');
-}
-
-function parseDob(dob: unknown): Date | null {
-  if (typeof dob !== 'string' || !dob.trim()) {
-    return null;
-  }
-  const parsed = new Date(dob);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed;
-}
-
-function formatRequest(request: {
+type RequestLean = {
   _id: mongoose.Types.ObjectId;
   fullName: string;
   idNumber: string;
@@ -52,15 +32,43 @@ function formatRequest(request: {
   nationality: string;
   academicLevel: string;
   track: string;
+  trackNote?: string | null;
   phone: string;
   dob: Date;
   centerId: mongoose.Types.ObjectId;
-  requestedLevelId: mongoose.Types.ObjectId;
+  requestedLevelId?: mongoose.Types.ObjectId | null;
+  courseIds?: mongoose.Types.ObjectId[] | null;
+  occupation?: string | null;
+  occupationOther?: string | null;
+  studentType?: string | null;
+  homeAddress?: {
+    area?: string | null;
+    block?: string | null;
+    street?: string | null;
+    avenue?: string | null;
+    house?: string | null;
+  } | null;
+  notes?: string | null;
+  documents?: {
+    civilId?: mongoose.Types.ObjectId | null;
+    photo?: mongoose.Types.ObjectId | null;
+    qualification?: mongoose.Types.ObjectId | null;
+  } | null;
   status: string;
   rejectionReason?: string | null;
   studentId?: mongoose.Types.ObjectId | null;
   createdAt?: Date;
-}) {
+};
+
+function fileEntry(id: mongoose.Types.ObjectId | null | undefined) {
+  return id ? { id: id.toString(), url: `/api/files/${id.toString()}` } : null;
+}
+
+function formatRequest(
+  request: RequestLean,
+  lookups?: { levelNames?: Map<string, string>; courseNames?: Map<string, string> }
+) {
+  const levelId = request.requestedLevelId?.toString() ?? null;
   return {
     id: request._id.toString(),
     fullName: request.fullName,
@@ -69,10 +77,33 @@ function formatRequest(request: {
     nationality: request.nationality,
     academicLevel: request.academicLevel,
     track: request.track,
+    trackNote: request.trackNote ?? '',
     phone: request.phone,
+    phoneDisplay: formatPhoneForDisplay(request.phone),
     dob: request.dob.toISOString().slice(0, 10),
     centerId: request.centerId.toString(),
-    requestedLevelId: request.requestedLevelId.toString(),
+    requestedLevelId: levelId,
+    requestedLevelName: levelId ? lookups?.levelNames?.get(levelId) ?? '' : '',
+    courses: (request.courseIds ?? []).map((id) => ({
+      id: id.toString(),
+      name: lookups?.courseNames?.get(id.toString()) ?? '',
+    })),
+    occupation: request.occupation ?? null,
+    occupationOther: request.occupationOther ?? '',
+    studentType: request.studentType ?? 'new',
+    homeAddress: {
+      area: request.homeAddress?.area ?? '',
+      block: request.homeAddress?.block ?? '',
+      street: request.homeAddress?.street ?? '',
+      avenue: request.homeAddress?.avenue ?? '',
+      house: request.homeAddress?.house ?? '',
+    },
+    notes: request.notes ?? '',
+    documents: {
+      civilId: fileEntry(request.documents?.civilId),
+      photo: fileEntry(request.documents?.photo),
+      qualification: fileEntry(request.documents?.qualification),
+    },
     status: request.status,
     rejectionReason: request.rejectionReason ?? undefined,
     studentId: request.studentId?.toString(),
@@ -80,170 +111,58 @@ function formatRequest(request: {
   };
 }
 
-async function validateCenterAndLevel(
-  centerId: string,
-  levelId: string
-): Promise<{ center: NonNullable<Awaited<ReturnType<typeof Center.findOne>>>; level: NonNullable<Awaited<ReturnType<typeof Level.findOne>>> } | null> {
-  if (!mongoose.isValidObjectId(centerId) || !mongoose.isValidObjectId(levelId)) {
-    return null;
-  }
-
-  const center = await Center.findOne({ _id: centerId, status: 'active' });
-  if (!center) {
-    return null;
-  }
-
-  const level = await Level.findOne({ _id: levelId, centerId: center._id });
-  if (!level) {
-    return null;
-  }
-
-  return { center, level };
+async function buildLookups(requests: RequestLean[]) {
+  const levelIds = requests.map((r) => r.requestedLevelId).filter(Boolean);
+  const courseIds = requests.flatMap((r) => r.courseIds ?? []);
+  const [levels, courses] = await Promise.all([
+    levelIds.length
+      ? Level.find({ _id: { $in: levelIds } }).select('fullName shortName').lean()
+      : Promise.resolve([]),
+    courseIds.length
+      ? Course.find({ _id: { $in: courseIds } }).select('name').lean()
+      : Promise.resolve([]),
+  ]);
+  return {
+    levelNames: new Map(levels.map((l) => [l._id.toString(), l.shortName || l.fullName])),
+    courseNames: new Map(courses.map((c) => [c._id.toString(), c.name])),
+  };
 }
 
 export async function submitRegistrationRequest(req: Request, res: Response): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>;
   try {
-    const {
-      fullName,
-      idNumber,
-      gender,
-      nationality,
-      academicLevel,
-      track,
-      phone,
-      password,
-      dob,
-      centerId,
-      requestedLevelId,
-    } = req.body as {
-      fullName?: string;
-      idNumber?: string;
-      gender?: string;
-      nationality?: string;
-      academicLevel?: string;
-      track?: string;
-      phone?: string;
-      password?: string;
-      dob?: string;
-      centerId?: string;
-      requestedLevelId?: string;
-    };
-
-    if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
-      sendError(res, 'الاسم الكامل مطلوب', 400);
+    const parsed = parseStudentInput(body, { requireExtended: true });
+    if (!parsed.ok) {
+      sendError(res, parsed.error, 400);
       return;
     }
+    const input = parsed.value as StudentInput;
 
-    if (!idNumber || typeof idNumber !== 'string') {
-      sendError(res, `${KUWAIT_CIVIL_ID_LABEL_AR} مطلوب`, 400);
-      return;
-    }
-
-    const normalizedIdNumber = normalizeIdNumber(idNumber);
-    if (!isKuwaitCivilId(normalizedIdNumber)) {
-      sendError(res, KUWAIT_CIVIL_ID_ERROR_AR, 400);
-      return;
-    }
-
-    if (!isStudentGender(gender)) {
-      sendError(res, 'الجنس مطلوب — اختاري ذكر أو أنثى', 400);
-      return;
-    }
-
-    if (!nationality || typeof nationality !== 'string' || !isValidNationality(nationality)) {
-      sendError(res, 'الجنسية غير صالحة', 400);
-      return;
-    }
-
-    if (
-      !academicLevel ||
-      typeof academicLevel !== 'string' ||
-      !isValidAcademicLevel(academicLevel)
-    ) {
-      sendError(res, 'المستوى الدراسي غير صالح', 400);
-      return;
-    }
-
-    if (!track || typeof track !== 'string' || !isClassTrack(track)) {
-      sendError(res, 'مسار الانضمام مطلوب — اختاري مطور أو دورة', 400);
-      return;
-    }
-
-    if (!phone || typeof phone !== 'string') {
-      sendError(res, 'رقم الهاتف مطلوب', 400);
-      return;
-    }
-
-    const normalizedPhone = normalizePhone(phone);
-    if (!/^\d{10}$/.test(normalizedPhone)) {
-      sendError(res, 'رقم الهاتف يجب أن يكون 10 أرقام', 400);
-      return;
-    }
-
-    if (!password || typeof password !== 'string') {
+    const password = body.password;
+    if (typeof password !== 'string' || !password) {
       sendError(res, 'كلمة المرور مطلوبة', 400);
       return;
     }
-
     if (!isDigitsOnlyPassword(password)) {
       sendError(res, PASSWORD_DIGITS_ERROR_AR, 400);
       return;
     }
 
-    const parsedDob = parseDob(dob);
-    if (!parsedDob) {
-      sendError(res, 'تاريخ الميلاد غير صالح', 400);
+    const centerId = typeof body.centerId === 'string' ? body.centerId.trim() : '';
+    if (!mongoose.isValidObjectId(centerId)) {
+      sendError(res, 'اختاري المركز', 400);
+      return;
+    }
+    const center = await Center.findOne({ _id: centerId, status: 'active' });
+    if (!center) {
+      sendError(res, 'المركز غير متاح', 400);
       return;
     }
 
-    if (!centerId || typeof centerId !== 'string') {
-      sendError(res, 'معرّف المركز مطلوب', 400);
-      return;
-    }
-
-    if (!requestedLevelId || typeof requestedLevelId !== 'string') {
-      sendError(res, 'المستوى المطلوب مطلوب', 400);
-      return;
-    }
-
-    const existingStudent = await Student.findOne({
-      idNumber: normalizedIdNumber,
-      deletedAt: null,
-    });
-    if (existingStudent) {
+    if (!isGenderCompatibleWithCenter(input.gender, center.genderAudience)) {
       sendError(
         res,
-        'رقم الهوية المدنية مسجل مسبقاً في مركز — لا يمكن التسجيل في مركز آخر قبل الحذف الكلي',
-        409
-      );
-      return;
-    }
-
-    const pendingRequest = await RegistrationRequest.findOne({
-      idNumber: normalizedIdNumber,
-      status: 'pending',
-    });
-    if (pendingRequest) {
-      sendError(res, 'يوجد طلب تسجيل معلق لهذه الهوية', 409);
-      return;
-    }
-
-    const existingUser = await User.findOne({ phone: normalizedPhone });
-    if (existingUser) {
-      sendError(res, 'رقم الهاتف مسجل مسبقاً', 409);
-      return;
-    }
-
-    const centerLevel = await validateCenterAndLevel(centerId, requestedLevelId);
-    if (!centerLevel) {
-      sendError(res, 'المركز أو المستوى غير صالح', 400);
-      return;
-    }
-
-    if (!isGenderCompatibleWithCenter(gender, centerLevel.center.genderAudience)) {
-      sendError(
-        res,
-        gender === 'female'
+        input.gender === 'female'
           ? 'هذا المركز رجالي — اختاري مركزاً نسائياً'
           : 'هذا المركز نسائي — اختر مركزاً رجالياً',
         400
@@ -251,20 +170,73 @@ export async function submitRegistrationRequest(req: Request, res: Response): Pr
       return;
     }
 
+    const placement = await resolvePlacement(center._id, input.track, input.levelId, input.courseIds);
+    if (!placement.ok) {
+      sendError(res, placement.error, 400);
+      return;
+    }
+
+    const existingStudent = await Student.findOne({ idNumber: input.idNumber, deletedAt: null });
+    if (existingStudent) {
+      sendError(
+        res,
+        'الرقم المدني مسجل مسبقاً في مركز — لا يمكن التسجيل في مركز آخر إلا بطلب نقل',
+        409
+      );
+      return;
+    }
+
+    const pendingRequest = await RegistrationRequest.findOne({
+      idNumber: input.idNumber,
+      status: 'pending',
+    });
+    if (pendingRequest) {
+      sendError(res, 'يوجد طلب تسجيل قيد المراجعة لهذا الرقم المدني', 409);
+      return;
+    }
+
+    const existingUser = await User.findOne({ phone: input.phone });
+    if (existingUser) {
+      sendError(res, 'رقم الهاتف مسجل مسبقاً', 409);
+      return;
+    }
+
+    const requestId = new mongoose.Types.ObjectId();
+    const documents = await storeUploadedDocuments(req, {
+      centerId: center._id.toString(),
+      registrationRequestId: requestId.toString(),
+    });
+
+    const missing = missingRequiredDocuments(documents, input.academicLevel);
+    if (missing.length) {
+      await Promise.all(Object.values(documents).map((id) => deleteFileSafe(id)));
+      sendError(res, `المرفقات المطلوبة: ${missing.map((k) => DOCUMENT_LABELS_AR[k]).join('، ')}`, 400);
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     const request = await RegistrationRequest.create({
-      fullName: fullName.trim(),
-      idNumber: normalizedIdNumber,
-      gender,
-      nationality,
-      academicLevel,
-      track,
-      phone: normalizedPhone,
-      dob: parsedDob,
+      _id: requestId,
+      fullName: input.fullName,
+      idNumber: input.idNumber,
+      gender: input.gender,
+      nationality: input.nationality,
+      academicLevel: input.academicLevel,
+      track: input.track,
+      trackNote: input.trackNote,
+      phone: input.phone,
+      dob: input.dob,
       passwordHash,
-      centerId: centerLevel.center._id,
-      requestedLevelId: centerLevel.level._id,
+      centerId: center._id,
+      requestedLevelId: placement.value.levelId,
+      courseIds: placement.value.courseIds,
+      occupation: input.occupation,
+      occupationOther: input.occupationOther,
+      studentType: input.studentType,
+      homeAddress: input.homeAddress,
+      notes: input.notes,
+      documents,
       status: 'pending',
     });
 
@@ -300,16 +272,16 @@ export async function listRegistrationRequests(req: Request, res: Response): Pro
       return;
     }
 
-    const requestStatus = status as 'pending' | 'approved' | 'rejected';
-
-    const requests = await RegistrationRequest.find({
+    const requests = (await RegistrationRequest.find({
       centerId: req.user.centerId,
-      status: requestStatus,
+      status: status as 'pending' | 'approved' | 'rejected',
     })
       .sort({ createdAt: -1 })
-      .lean();
+      .limit(200)
+      .lean()) as unknown as RequestLean[];
 
-    sendSuccess(res, requests.map((request) => formatRequest(request)));
+    const lookups = await buildLookups(requests);
+    sendSuccess(res, requests.map((request) => formatRequest(request, lookups)));
   } catch (err) {
     console.error('[listRegistrationRequests]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
@@ -323,23 +295,24 @@ export async function getRegistrationRequest(req: Request, res: Response): Promi
       return;
     }
 
-    const { id } = req.params;
+    const id = paramId(req.params.id);
     if (!mongoose.isValidObjectId(id)) {
       sendError(res, 'معرّف الطلب غير صالح', 400);
       return;
     }
 
-    const request = await RegistrationRequest.findOne({
+    const request = (await RegistrationRequest.findOne({
       _id: id,
       centerId: req.user.centerId,
-    }).lean();
+    }).lean()) as unknown as RequestLean | null;
 
     if (!request) {
       sendError(res, 'لم يُعثر على الطلب', 404);
       return;
     }
 
-    sendSuccess(res, formatRequest(request));
+    const lookups = await buildLookups([request]);
+    sendSuccess(res, formatRequest(request, lookups));
   } catch (err) {
     console.error('[getRegistrationRequest]', err);
     sendError(res, 'حدث خطأ في الخادم', 500);
@@ -353,7 +326,7 @@ export async function approveRegistrationRequest(req: Request, res: Response): P
       return;
     }
 
-    const { id } = req.params;
+    const id = paramId(req.params.id);
     if (!mongoose.isValidObjectId(id)) {
       sendError(res, 'معرّف الطلب غير صالح', 400);
       return;
@@ -374,30 +347,30 @@ export async function approveRegistrationRequest(req: Request, res: Response): P
       return;
     }
 
+    // يمكن للمشرفة تعديل المسار/المستوى عند القبول
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const track: StudentTrack = isStudentTrack(body.track)
+      ? body.track
+      : ((request.track ?? 'mutor') as StudentTrack);
     const levelId =
-      typeof req.body?.levelId === 'string' && req.body.levelId.trim()
-        ? req.body.levelId.trim()
-        : request.requestedLevelId.toString();
+      typeof body.levelId === 'string' && body.levelId.trim()
+        ? body.levelId.trim()
+        : request.requestedLevelId?.toString() ?? null;
 
-    const centerLevel = await validateCenterAndLevel(
-      request.centerId.toString(),
-      levelId
+    const placement = await resolvePlacement(
+      request.centerId,
+      track,
+      levelId,
+      (request.courseIds ?? []).map((cid) => cid.toString())
     );
-    if (!centerLevel) {
-      sendError(res, 'المستوى غير صالح لهذا المركز', 400);
+    if (!placement.ok) {
+      sendError(res, placement.error, 400);
       return;
     }
 
-    const existingStudent = await Student.findOne({
-      idNumber: request.idNumber,
-      deletedAt: null,
-    });
+    const existingStudent = await Student.findOne({ idNumber: request.idNumber, deletedAt: null });
     if (existingStudent) {
-      sendError(
-        res,
-        'رقم الهوية المدنية مسجل مسبقاً في مركز — لا يمكن التسجيل في مركز آخر قبل الحذف الكلي',
-        409
-      );
+      sendError(res, 'الرقم المدني مسجل مسبقاً في مركز', 409);
       return;
     }
 
@@ -413,13 +386,22 @@ export async function approveRegistrationRequest(req: Request, res: Response): P
       gender: request.gender ?? 'female',
       nationality: request.nationality,
       academicLevel: request.academicLevel,
-      track: request.track ?? 'mutor',
+      track,
+      trackNote: request.trackNote ?? '',
       phone: request.phone,
       dob: request.dob,
-      levelId: centerLevel.level._id,
+      levelId: placement.value.levelId,
+      courseIds: placement.value.courseIds,
       centerId: request.centerId,
+      occupation: request.occupation ?? null,
+      occupationOther: request.occupationOther ?? '',
+      studentType: request.studentType ?? 'new',
+      homeAddress: request.homeAddress ?? {},
+      notes: request.notes ?? '',
+      documents: request.documents ?? {},
       deletedAt: null,
       enrollmentStatus: 'enrolled',
+      enrollmentHistory: [{ action: 'registered', by: req.user._id, at: new Date() }],
     });
 
     const user = await User.create({
@@ -437,10 +419,15 @@ export async function approveRegistrationRequest(req: Request, res: Response): P
     request.reviewedBy = req.user._id;
     await request.save();
 
+    await updateFilesMetadata(
+      [request.documents?.civilId, request.documents?.photo, request.documents?.qualification],
+      { studentId: student._id.toString() }
+    );
+
     const notifyResult = await notifyUsers([user._id], {
       type: 'registration_approved',
-      title: 'تم قبولك في المركز',
-      body: 'تمت الموافقة على طلب تسجيلك. يمكنكِ تسجيل الدخول الآن.',
+      title: 'تم قبولكِ في المركز',
+      body: 'تمت الموافقة على طلب تسجيلكِ. يمكنكِ تسجيل الدخول الآن.',
       centerId: request.centerId,
       data: {
         studentId: student._id.toString(),
@@ -467,14 +454,13 @@ export async function rejectRegistrationRequest(req: Request, res: Response): Pr
       return;
     }
 
-    const { id } = req.params;
+    const id = paramId(req.params.id);
     if (!mongoose.isValidObjectId(id)) {
       sendError(res, 'معرّف الطلب غير صالح', 400);
       return;
     }
 
-    const reason =
-      typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
     if (!reason) {
       sendError(res, 'سبب الرفض مطلوب', 400);
       return;

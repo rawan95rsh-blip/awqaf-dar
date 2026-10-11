@@ -5,13 +5,13 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "awqafdar",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F6F3EC"
     },
     "ios": {
       "supportsTablet": true,
@@ -19,7 +19,10 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "لإشعارات قبول التسجيل واعتذار المعلمة عن الحصة",
-        "NSFaceIDUsageDescription": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور"
+        "NSFaceIDUsageDescription": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور",
+        "NSCameraUsageDescription": "لتصوير البطاقة المدنية والمؤهل الدراسي عند التسجيل",
+        "NSPhotoLibraryUsageDescription": "لاختيار صور المرفقات (البطاقة المدنية، الصورة الشخصية، المؤهل)",
+        "CFBundleAllowMixedLocalizations": true
       }
     },
     "android": {
@@ -27,10 +30,11 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0E5E4E"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "bundler": "metro",
@@ -44,13 +48,21 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#1d9bf0"
+          "color": "#0E5E4E"
         }
       ],
       [
         "expo-local-authentication",
         {
           "faceIDPermission": "لفتح التطبيق ببصمة الوجه دون إدخال كلمة المرور"
+        }
+      ],
+      "expo-localization",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "لاختيار صور المرفقات (البطاقة المدنية، الصورة الشخصية، المؤهل)",
+          "cameraPermission": "لتصوير البطاقة المدنية والمؤهل الدراسي عند التسجيل"
         }
       ]
     ],
@@ -60,8 +72,13 @@
     "extra": {
       "eas": {
         "projectId": "e8bb9308-72f5-4285-b970-6ae217a5fc5b"
-      }
+      },
+      "supportsRTL": true,
+      "forcesRTL": true
     },
-    "owner": "rawan.alshatri"
+    "owner": "rawan.alshatri",
+    "locales": {
+      "ar": "./locales/ar.json"
+    }
   }
 }

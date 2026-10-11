@@ -1,6 +1,6 @@
 import { Alert } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
+import { deleteItem, getItem, setItem } from '@/src/utils/storage';
 
 const BIOMETRIC_ENABLED_KEY = 'biometric_unlock_enabled';
 
@@ -41,7 +41,7 @@ export async function getBiometricAvailability(): Promise<BiometricAvailability>
 
 export async function getBiometricEnabled(): Promise<boolean> {
   try {
-    const value = await SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY);
+    const value = await getItem(BIOMETRIC_ENABLED_KEY);
     return value === '1';
   } catch {
     return false;
@@ -50,10 +50,10 @@ export async function getBiometricEnabled(): Promise<boolean> {
 
 export async function setBiometricEnabled(enabled: boolean): Promise<void> {
   if (enabled) {
-    await SecureStore.setItemAsync(BIOMETRIC_ENABLED_KEY, '1');
+    await setItem(BIOMETRIC_ENABLED_KEY, '1');
     return;
   }
-  await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
+  await deleteItem(BIOMETRIC_ENABLED_KEY);
 }
 
 export type BiometricAuthResult = {

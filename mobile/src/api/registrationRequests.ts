@@ -1,164 +1,116 @@
-import { apiClient, getApiErrorMessage, type ApiSuccess } from '@/src/api/client';
-import { fetchLevelsByCenter } from '@/src/api/levels';
-import type { AudienceFilter, GenderAudience } from '@/src/constants/genderAudience';
-import type { LevelListItem } from '@/src/types/level';
+import { apiClient, request, type ApiSuccess } from "@/src/api/client";
+import { fetchLevelsByCenter } from "@/src/api/levels";
+import { buildStudentFormData, type DocumentFiles, type StudentPayload } from "@/src/api/students";
+import type { DocumentKind, Gender, Occupation, StudentTrack, StudentType } from "@/src/constants/domain";
+import type { DocumentEntry, HomeAddress } from "@/src/types/student";
 
 export interface PublicCenter {
   id: string;
   nameAr: string;
   addressText: string;
   city: string;
-  genderAudience: GenderAudience;
+  genderAudience: Gender;
 }
-
-export type LevelOption = LevelListItem;
 
 export { fetchLevelsByCenter };
 
-export interface SubmitRegistrationRequest {
-  fullName: string;
-  idNumber: string;
-  gender: 'female' | 'male';
-  nationality: string;
-  academicLevel: string;
-  track: 'mutor' | 'courses';
-  phone: string;
-  password: string;
-  dob: string;
+export const registrationQueryKeys = {
+  pending: ["registration-requests", "pending"] as const,
+  centers: (audience: string) => ["public-centers", audience] as const,
+};
+
+export async function fetchPublicCenters(audience: Gender | "all" = "all"): Promise<PublicCenter[]> {
+  return (
+    (await request(() =>
+      apiClient.get<ApiSuccess<PublicCenter[]>>("/api/centers/public", {
+        params: audience === "all" ? undefined : { audience },
+      })
+    )) ?? []
+  );
+}
+
+export type SubmitRegistrationPayload = StudentPayload & {
   centerId: string;
-  requestedLevelId: string;
-}
-
-export interface SubmitRegistrationResponse {
-  id: string;
-  message: string;
-  status: string;
-}
-
-export async function fetchPublicCenters(
-  audience: AudienceFilter = 'all'
-): Promise<PublicCenter[]> {
-  try {
-    const response = await apiClient.get<ApiSuccess<PublicCenter[]>>('/api/centers/public', {
-      params: audience === 'all' ? undefined : { audience },
-    });
-    return response.data.data ?? [];
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
-}
+  password: string;
+};
 
 export async function submitRegistrationRequest(
-  data: SubmitRegistrationRequest
-): Promise<SubmitRegistrationResponse> {
-  try {
-    const response = await apiClient.post<ApiSuccess<SubmitRegistrationResponse>>(
-      '/api/registration-requests',
-      data
-    );
-    const payload = response.data.data;
-    if (!payload?.id) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return payload;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+  payload: SubmitRegistrationPayload,
+  documents: DocumentFiles
+): Promise<{ id: string; message: string; status: string }> {
+  const form = await buildStudentFormData(payload as unknown as Record<string, unknown>, documents);
+  return request(() =>
+    apiClient.post<ApiSuccess<{ id: string; message: string; status: string }>>("/api/registration-requests", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+      transformRequest: (data: unknown) => data,
+      timeout: 90000,
+    })
+  );
 }
 
 export interface RegistrationRequestItem {
   id: string;
   fullName: string;
   idNumber: string;
-  gender?: 'female' | 'male';
+  gender: Gender;
   nationality: string;
   academicLevel: string;
-  track?: 'mutor' | 'courses';
+  track: StudentTrack;
+  trackNote: string;
   phone: string;
+  phoneDisplay: string;
   dob: string;
   centerId: string;
-  requestedLevelId: string;
-  status: 'pending' | 'approved' | 'rejected';
+  requestedLevelId: string | null;
+  requestedLevelName: string;
+  courses: Array<{ id: string; name: string }>;
+  occupation: Occupation | null;
+  occupationOther: string;
+  studentType: StudentType;
+  homeAddress: HomeAddress;
+  notes: string;
+  documents: Record<DocumentKind, DocumentEntry>;
+  status: "pending" | "approved" | "rejected";
   rejectionReason?: string;
   studentId?: string;
   createdAt?: string;
 }
 
-export interface ApproveRequestResponse {
-  studentId: string;
-  userId: string;
-  message: string;
-}
-
-export interface RejectRequestResponse {
-  id: string;
-  status: string;
-  message: string;
-}
-
 export async function listPendingRequests(): Promise<RegistrationRequestItem[]> {
-  try {
-    const response = await apiClient.get<ApiSuccess<RegistrationRequestItem[]>>(
-      '/api/registration-requests',
-      { params: { status: 'pending' } }
-    );
-    return response.data.data ?? [];
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+  return (
+    (await request(() =>
+      apiClient.get<ApiSuccess<RegistrationRequestItem[]>>("/api/registration-requests", {
+        params: { status: "pending" },
+      })
+    )) ?? []
+  );
 }
 
-export async function getRegistrationRequest(
-  id: string
-): Promise<RegistrationRequestItem> {
-  try {
-    const response = await apiClient.get<ApiSuccess<RegistrationRequestItem>>(
-      `/api/registration-requests/${id}`
-    );
-    const payload = response.data.data;
-    if (!payload?.id) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return payload;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+export function getRegistrationRequest(id: string): Promise<RegistrationRequestItem> {
+  return request(() => apiClient.get<ApiSuccess<RegistrationRequestItem>>(`/api/registration-requests/${id}`));
 }
 
-export async function approveRequest(
+export function approveRequest(
   id: string,
-  levelId?: string
-): Promise<ApproveRequestResponse> {
-  try {
-    const response = await apiClient.patch<ApiSuccess<ApproveRequestResponse>>(
-      `/api/registration-requests/${id}/approve`,
-      levelId ? { levelId } : {}
-    );
-    const payload = response.data.data;
-    if (!payload?.studentId) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return payload;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+  body: { levelId?: string; track?: StudentTrack } = {}
+): Promise<{ studentId: string; message: string }> {
+  return request(() =>
+    apiClient.patch<ApiSuccess<{ studentId: string; message: string }>>(`/api/registration-requests/${id}/approve`, body)
+  );
 }
 
-export async function rejectRequest(
-  id: string,
-  reason: string
-): Promise<RejectRequestResponse> {
-  try {
-    const response = await apiClient.patch<ApiSuccess<RejectRequestResponse>>(
-      `/api/registration-requests/${id}/reject`,
-      { reason }
-    );
-    const payload = response.data.data;
-    if (!payload?.id) {
-      throw new Error('استجابة غير صالحة من الخادم');
-    }
-    return payload;
-  } catch (err) {
-    throw new Error(getApiErrorMessage(err));
-  }
+export function rejectRequest(id: string, reason: string): Promise<{ id: string; message: string }> {
+  return request(() =>
+    apiClient.patch<ApiSuccess<{ id: string; message: string }>>(`/api/registration-requests/${id}/reject`, { reason })
+  );
+}
+
+export interface PublicCourse {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export async function fetchCenterCourses(centerId: string): Promise<PublicCourse[]> {
+  return (await request(() => apiClient.get<ApiSuccess<PublicCourse[]>>(`/api/centers/${centerId}/courses`))) ?? [];
 }

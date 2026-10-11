@@ -3,6 +3,8 @@ import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 export const NOTIFICATION_TYPES = [
   'registration_approved',
   'session_cancelled',
+  'enrollment_updated',
+  'transfer_updated',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

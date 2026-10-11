@@ -1,916 +1,638 @@
 import { useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Platform,
-  ActivityIndicator,
-} from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import ScreenContainer from "@/src/components/ScreenContainer";
-import Input from "@/src/components/Input";
-import Button from "@/src/components/Button";
-import SelectField from "@/src/components/SelectField";
-import { colors, spacing, centerColors } from "@/constants";
+import { colors, radius, space } from "@/src/theme";
 import {
-  ACADEMIC_LEVEL_OPTIONS,
-  NATIONALITY_OPTIONS,
-} from "@/src/constants/registrationOptions";
+  Banner,
+  Button,
+  Card,
+  ChoiceCards,
+  ChoiceChips,
+  DateField,
+  Header,
+  ImagePickerField,
+  InfoRow,
+  PhoneField,
+  Screen,
+  SelectField,
+  Steps,
+  Text,
+  TextField,
+  type PickedImage,
+} from "@/src/ui";
 import {
-  GENDER_AUDIENCE_LABELS,
-  STUDENT_GENDER_OPTIONS,
-  type StudentGender,
-} from "@/src/constants/genderAudience";
-import {
+  fetchCenterCourses,
   fetchLevelsByCenter,
   fetchPublicCenters,
   submitRegistrationRequest,
 } from "@/src/api/registrationRequests";
+import {
+  ACADEMIC_LEVEL_OPTIONS,
+  CENTER_AUDIENCE_LABELS,
+  CIVIL_ID_LENGTH,
+  DOCUMENT_META,
+  GENDER_OPTIONS,
+  NATIONALITY_OPTIONS,
+  OCCUPATION_OPTIONS,
+  PASSWORD_HINT,
+  STUDENT_TYPE_OPTIONS,
+  TRACK_LABELS,
+  TRACK_OPTIONS,
+  academicLevelLabel,
+  nationalityLabel,
+  occupationLabel,
+  trackRequiresLevel,
+  validateCivilId,
+  validatePassword,
+  type DocumentKind,
+  type Gender,
+  type Occupation,
+  type StudentTrack,
+  type StudentType,
+} from "@/src/constants/domain";
+import { DEFAULT_COUNTRY, formatPhone, toInternational, toLatinDigits, validatePhone } from "@/src/constants/phone";
+import { formatAddress, type HomeAddress } from "@/src/types/student";
 import { hasCenterLocation, openCenterInMaps } from "@/src/utils/maps";
-import {
-  filterDigitsOnly,
-  isDigitsOnlyPassword,
-  PASSWORD_DIGITS_ERROR_AR,
-} from "@/src/utils/password";
-import {
-  isKuwaitCivilId,
-  KUWAIT_CIVIL_ID_ERROR_AR,
-  KUWAIT_CIVIL_ID_LABEL_AR,
-  KUWAIT_CIVIL_ID_LENGTH,
-  normalizeIdNumber,
-} from "@/src/utils/idNumber";
-import { TRACK_LABELS, type ClassTrack } from "@/src/types/classOffer";
+import { formatDateLong } from "@/src/utils/format";
 
-const ENROLLMENT_TRACK_OPTIONS: Array<{ id: ClassTrack; label: string }> = [
-  { id: "mutor", label: TRACK_LABELS.mutor },
-  { id: "courses", label: TRACK_LABELS.courses },
-];
+const STEPS = ["البيانات الشخصية", "التواصل والسكن", "المركز والمسار", "المرفقات والمراجعة"];
 
-function normalizePhone(phone: string): string {
-  return phone.trim().replace(/\s/g, "");
-}
-
-function formatDateLabel(date: Date): string {
-  return date.toLocaleDateString("ar-KW", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
-function formatDobForApi(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-type FieldErrors = {
-  fullName?: string;
-  idNumber?: string;
-  gender?: string;
-  nationalityId?: string;
-  dob?: string;
-  academicLevelId?: string;
-  phone?: string;
-  password?: string;
-  track?: string;
-  centerId?: string;
-  memorizationLevelId?: string;
-};
-
-function validateForm(values: {
+type Form = {
   fullName: string;
   idNumber: string;
-  gender: StudentGender | null;
-  nationalityId: string | null;
+  gender: Gender | null;
+  nationality: string | null;
   dob: Date | null;
-  academicLevelId: string | null;
+  academicLevel: string | null;
+  occupation: Occupation | null;
+  occupationOther: string;
   phone: string;
+  address: HomeAddress;
   password: string;
-  track: ClassTrack | null;
+  confirmPassword: string;
   centerId: string | null;
-  memorizationLevelId: string | null;
-}): FieldErrors {
-  const errors: FieldErrors = {};
+  track: StudentTrack | null;
+  trackNote: string;
+  levelId: string | null;
+  courseIds: string[];
+  studentType: StudentType | null;
+  notes: string;
+};
 
-  if (!values.fullName.trim()) {
-    errors.fullName = "أدخل الاسم الكامل";
-  } else if (values.fullName.trim().length < 3) {
-    errors.fullName = "الاسم قصير جداً";
-  }
+const INITIAL: Form = {
+  fullName: "",
+  idNumber: "",
+  gender: null,
+  nationality: "KW",
+  dob: null,
+  academicLevel: null,
+  occupation: null,
+  occupationOther: "",
+  phone: "",
+  address: { area: "", block: "", street: "", avenue: "", house: "" },
+  password: "",
+  confirmPassword: "",
+  centerId: null,
+  track: null,
+  trackNote: "",
+  levelId: null,
+  courseIds: [],
+  studentType: null,
+  notes: "",
+};
 
-  const normalizedId = normalizeIdNumber(values.idNumber);
-  if (!normalizedId) {
-    errors.idNumber = `أدخل ${KUWAIT_CIVIL_ID_LABEL_AR}`;
-  } else if (!isKuwaitCivilId(normalizedId)) {
-    errors.idNumber = KUWAIT_CIVIL_ID_ERROR_AR;
-  }
-
-  if (!values.gender) {
-    errors.gender = "اختاري الجنس";
-  }
-
-  if (!values.nationalityId) {
-    errors.nationalityId = "اختر الجنسية";
-  }
-
-  if (!values.dob) {
-    errors.dob = "اختر تاريخ الميلاد";
-  }
-
-  if (!values.academicLevelId) {
-    errors.academicLevelId = "اختر المستوى الدراسي";
-  }
-
-  const normalizedPhone = normalizePhone(values.phone);
-  if (!normalizedPhone) {
-    errors.phone = "أدخل رقم الهاتف";
-  } else if (!/^\d{10}$/.test(normalizedPhone)) {
-    errors.phone = "رقم الهاتف يجب أن يكون 10 أرقام";
-  }
-
-  if (!values.password) {
-    errors.password = "أدخل كلمة المرور";
-  } else if (!isDigitsOnlyPassword(values.password)) {
-    errors.password = PASSWORD_DIGITS_ERROR_AR;
-  }
-
-  if (!values.track) {
-    errors.track = "اختاري مسار الانضمام";
-  }
-
-  if (!values.centerId) {
-    errors.centerId = "اختر المركز";
-  }
-
-  if (!values.memorizationLevelId) {
-    errors.memorizationLevelId = "اختر مستوى الحفظ";
-  }
-
-  return errors;
-}
+type Errors = Partial<Record<string, string>>;
 
 export default function RegisterStudentScreen() {
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
-  const [idNumber, setIdNumber] = useState("");
-  const [nationalityId, setNationalityId] = useState<string | null>(null);
-  const [dob, setDob] = useState<Date | null>(null);
-  const [showDobPicker, setShowDobPicker] = useState(false);
-  const [academicLevelId, setAcademicLevelId] = useState<string | null>(null);
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [track, setTrack] = useState<ClassTrack | null>(null);
-  const [centerId, setCenterId] = useState<string | null>(null);
-  const [gender, setGender] = useState<StudentGender | null>(null);
-  const [memorizationLevelId, setMemorizationLevelId] = useState<string | null>(
-    null
-  );
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState<Form>(INITIAL);
+  const [country, setCountry] = useState(DEFAULT_COUNTRY);
+  const [docs, setDocs] = useState<Record<DocumentKind, PickedImage | null>>({
+    civilId: null,
+    photo: null,
+    qualification: null,
+  });
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const set = <K extends keyof Form>(key: K, value: Form[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (errors[key as string]) setErrors((prev) => ({ ...prev, [key as string]: undefined }));
+  };
 
   const centersQuery = useQuery({
-    queryKey: ["public-centers", gender],
-    queryFn: () => fetchPublicCenters(gender ?? "all"),
-    enabled: Boolean(gender),
+    queryKey: ["public-centers", form.gender],
+    queryFn: () => fetchPublicCenters(form.gender ?? "all"),
+    enabled: !!form.gender,
   });
 
   const levelsQuery = useQuery({
-    queryKey: ["center-levels", centerId],
-    queryFn: () => fetchLevelsByCenter(centerId!),
-    enabled: Boolean(centerId),
+    queryKey: ["center-levels", form.centerId],
+    queryFn: () => fetchLevelsByCenter(form.centerId!),
+    enabled: !!form.centerId,
   });
 
-  const centerOptions = useMemo(
-    () =>
-      (centersQuery.data ?? []).map((center) => ({
-        id: center.id,
-        label: center.nameAr,
-      })),
-    [centersQuery.data]
-  );
-
-  const selectedCenter = useMemo(
-    () => (centersQuery.data ?? []).find((center) => center.id === centerId) ?? null,
-    [centersQuery.data, centerId]
-  );
-
-  const memorizationLevelOptions = useMemo(
-    () =>
-      (levelsQuery.data ?? []).map((level) => ({
-        id: level.id,
-        label: level.shortName || level.fullName,
-      })),
-    [levelsQuery.data]
-  );
-
-  const submitMutation = useMutation({
-    mutationFn: submitRegistrationRequest,
-    onSuccess: (data) => {
-      Alert.alert(
-        "تم إرسال الطلب",
-        data.message ||
-          "تم إرسال طلبك بنجاح — بانتظار موافقة المركز.\nسيتم تفعيل حسابك بعد الموافقة.",
-        [
-          {
-            text: "العودة لتسجيل الدخول",
-            onPress: () => router.replace("/(auth)/login" as Href),
-          },
-        ]
-      );
-    },
-    onError: (err: Error) => {
-      setFormError(err.message ?? "فشل إرسال الطلب");
-    },
+  const coursesQuery = useQuery({
+    queryKey: ["center-courses", form.centerId],
+    queryFn: () => fetchCenterCourses(form.centerId!),
+    enabled: !!form.centerId,
   });
 
-  const clearFieldError = (key: keyof FieldErrors) => {
-    setFieldErrors((prev) => {
-      if (!prev[key]) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-    if (formError) setFormError(null);
-  };
+  const selectedCenter = (centersQuery.data ?? []).find((c) => c.id === form.centerId) ?? null;
+  const levelOptions = useMemo(
+    () =>
+      (levelsQuery.data ?? [])
+        .filter((l) => l.track === form.track)
+        .map((l) => ({ id: l.id, label: l.shortName, description: l.fullName })),
+    [levelsQuery.data, form.track]
+  );
+  const courseOptions = (coursesQuery.data ?? []).map((c) => ({ id: c.id, label: c.name, description: c.description }));
+  const qualificationRequired = !!form.academicLevel && form.academicLevel !== "none";
 
-  const handleCenterSelect = (nextCenterId: string) => {
-    setCenterId(nextCenterId);
-    setMemorizationLevelId(null);
-    clearFieldError("centerId");
-    clearFieldError("memorizationLevelId");
-  };
+  const mutation = useMutation({
+    mutationFn: () =>
+      submitRegistrationRequest(
+        {
+          fullName: form.fullName.trim(),
+          idNumber: form.idNumber,
+          gender: form.gender!,
+          nationality: form.nationality!,
+          dob: form.dob!.toISOString().slice(0, 10),
+          academicLevel: form.academicLevel!,
+          occupation: form.occupation!,
+          occupationOther: form.occupationOther.trim(),
+          phone: toLatinDigits(form.phone),
+          countryCode: country.dialCode,
+          homeAddress: form.address,
+          password: form.password,
+          centerId: form.centerId!,
+          track: form.track!,
+          trackNote: form.trackNote.trim(),
+          levelId: trackRequiresLevel(form.track) ? form.levelId : null,
+          courseIds: form.courseIds,
+          studentType: form.studentType!,
+          notes: form.notes.trim(),
+        },
+        { civilId: docs.civilId, photo: docs.photo, qualification: qualificationRequired ? docs.qualification : null }
+      ),
+    onSuccess: () => setSubmitted(true),
+  });
 
-  const handleGenderSelect = (next: StudentGender) => {
-    setGender(next);
-    setCenterId(null);
-    setMemorizationLevelId(null);
-    clearFieldError("gender");
-    clearFieldError("centerId");
-    clearFieldError("memorizationLevelId");
-  };
-
-  const handleDobChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
-    if (Platform.OS === "android") {
-      setShowDobPicker(false);
+  const validateStep = (index: number): Errors => {
+    const e: Errors = {};
+    if (index === 0) {
+      if (form.fullName.trim().split(/\s+/).length < 2) e.fullName = "اكتبي الاسم الكامل (اسمين على الأقل)";
+      const civil = validateCivilId(form.idNumber);
+      if (civil) e.idNumber = civil;
+      if (!form.gender) e.gender = "اختاري الجنس";
+      if (!form.nationality) e.nationality = "اختاري الجنسية";
+      if (!form.dob) e.dob = "اختاري تاريخ الميلاد";
+      if (!form.academicLevel) e.academicLevel = "اختاري المؤهل الدراسي";
+      if (!form.occupation) e.occupation = "اختاري الوظيفة الحالية";
+      if (form.occupation === "other" && !form.occupationOther.trim()) e.occupationOther = "اكتبي الوظيفة";
     }
-    if (event.type === "dismissed") {
-      setShowDobPicker(false);
+    if (index === 1) {
+      const phone = validatePhone(form.phone, country);
+      if (phone) e.phone = phone;
+      if (!form.address.area.trim()) e.area = "اكتبي المنطقة";
+      const pass = validatePassword(form.password);
+      if (pass) e.password = pass;
+      else if (form.password !== form.confirmPassword) e.confirmPassword = "كلمتا المرور غير متطابقتين";
+    }
+    if (index === 2) {
+      if (!form.centerId) e.centerId = "اختاري المركز";
+      if (!form.track) e.track = "اختاري مسار الانضمام";
+      if (trackRequiresLevel(form.track) && !form.levelId) e.levelId = "اختاري المستوى";
+      if (form.track === "courses" && form.courseIds.length === 0) e.courseIds = "اختاري دورة واحدة على الأقل";
+      if (form.track === "other" && !form.trackNote.trim()) e.trackNote = "وضّحي المسار المطلوب";
+      if (!form.studentType) e.studentType = "حدّدي: مستجدة أم مستمرة";
+    }
+    if (index === 3) {
+      if (!docs.civilId) e.civilId = "أرفقي صورة البطاقة المدنية";
+      if (!docs.photo) e.photo = "أرفقي الصورة الشخصية";
+      if (qualificationRequired && !docs.qualification) e.qualification = "أرفقي صورة آخر مؤهل";
+    }
+    return e;
+  };
+
+  const next = () => {
+    const e = validateStep(step);
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    if (step < STEPS.length - 1) {
+      setStep(step + 1);
       return;
     }
-    if (selectedDate) {
-      setDob(selectedDate);
-      clearFieldError("dob");
-    }
+    mutation.mutate();
   };
 
-  const handleSubmit = () => {
-    const errors = validateForm({
-      fullName,
-      idNumber,
-      gender,
-      nationalityId,
-      dob,
-      academicLevelId,
-      phone,
-      password,
-      track,
-      centerId,
-      memorizationLevelId,
-    });
+  const back = () => (step === 0 ? router.back() : setStep(step - 1));
 
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
-      setFormError("راجعي الحقول المطلوبة");
-      return;
-    }
-
-    if (
-      !dob ||
-      !gender ||
-      !nationalityId ||
-      !academicLevelId ||
-      !track ||
-      !centerId ||
-      !memorizationLevelId
-    ) {
-      return;
-    }
-
-    setFieldErrors({});
-    setFormError(null);
-
-    submitMutation.mutate({
-      fullName: fullName.trim(),
-      idNumber: normalizeIdNumber(idNumber),
-      gender,
-      nationality: nationalityId,
-      academicLevel: academicLevelId,
-      track,
-      phone: normalizePhone(phone),
-      password,
-      dob: formatDobForApi(dob),
-      centerId,
-      requestedLevelId: memorizationLevelId,
-    });
-  };
-
-  const centersLoading = centersQuery.isLoading;
-  const levelsLoading = Boolean(centerId) && levelsQuery.isLoading;
-  const centersLoadError =
-    centersQuery.isError && !centersQuery.isFetching
-      ? "تعذر تحميل المراكز"
-      : null;
+  if (submitted) {
+    return (
+      <Screen
+        footer={
+          <Button fullWidth size="lg" onPress={() => router.replace("/(auth)/login" as Href)}>
+            العودة لتسجيل الدخول
+          </Button>
+        }
+      >
+        <View style={styles.success}>
+          <View style={styles.successIcon}>
+            <MaterialCommunityIcons name="check-decagram" size={56} color={colors.primary} />
+          </View>
+          <Text variant="title" align="center">
+            تم إرسال طلبكِ بنجاح
+          </Text>
+          <Text variant="body" color="textSecondary" align="center">
+            {`ستراجع إدارة ${selectedCenter?.nameAr ?? "المركز"} طلبكِ ومرفقاتكِ، وسيصلكِ إشعار عند القبول. بعدها يمكنكِ الدخول برقمكِ المدني أو هاتفكِ.`}
+          </Text>
+          <Card tone="primary" style={styles.successCard}>
+            <InfoRow label="الرقم المدني" value={form.idNumber} />
+            <InfoRow label="الهاتف" value={formatPhone(toInternational(form.phone, country))} />
+            <InfoRow label="المسار" value={form.track ? TRACK_LABELS[form.track] : ""} last />
+          </Card>
+        </View>
+      </Screen>
+    );
+  }
 
   return (
-    <ScreenContainer>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => router.back()}
-            style={styles.backButton}
-            accessibilityLabel="رجوع"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons
-              name="arrow-right"
-              size={24}
-              color={colors.text}
-            />
-          </Pressable>
-          <Text style={styles.headerTitle}>تسجيل طالبة</Text>
-          <View style={styles.headerDots}>
-            <View style={[styles.dot, styles.dotGreen]} />
-            <View style={[styles.dot, styles.dotYellow]} />
-            <View style={[styles.dot, styles.dotRed]} />
-          </View>
-        </View>
-
-        <View style={styles.logoBox}>
-          <MaterialCommunityIcons
-            name="account-school-outline"
-            size={48}
-            color={colors.primary}
-          />
-        </View>
-        <Text style={styles.logoTitle}>انضمام طالبة</Text>
-        <Text style={styles.logoSubtitle}>تقديم طلب انضمام لمركز قرآني</Text>
-
-        <View style={styles.infoBanner}>
-          <MaterialCommunityIcons
-            name="information-outline"
-            size={18}
-            color={colors.primary}
-          />
-          <Text style={styles.infoBannerText}>
-            سيتم مراجعة طلبك من قبل المركز قبل تفعيل الحساب
-          </Text>
-        </View>
-
-        {centersLoadError ? (
-          <Text style={styles.formError}>{centersLoadError}</Text>
-        ) : null}
-        {formError ? <Text style={styles.formError}>{formError}</Text> : null}
-
-        <Input
-          label="الاسم الكامل"
-          required
-          value={fullName}
-          onChangeText={(text) => {
-            setFullName(text);
-            clearFieldError("fullName");
-          }}
-          placeholder="نورة العتيبي"
-          accessibilityLabel="الاسم الكامل"
-          error={fieldErrors.fullName}
-        />
-
-        <Input
-          label={KUWAIT_CIVIL_ID_LABEL_AR}
-          required
-          value={idNumber}
-          onChangeText={(text) => {
-            setIdNumber(filterDigitsOnly(text).slice(0, KUWAIT_CIVIL_ID_LENGTH));
-            clearFieldError("idNumber");
-          }}
-          placeholder="12 رقماً"
-          keyboardType="number-pad"
-          accessibilityLabel={KUWAIT_CIVIL_ID_LABEL_AR}
-          error={fieldErrors.idNumber}
-        />
-
-        <SelectField
-          label="الجنسية"
-          required
-          value={nationalityId}
-          options={NATIONALITY_OPTIONS}
-          onSelect={(id) => {
-            setNationalityId(id);
-            clearFieldError("nationalityId");
-          }}
-          placeholder="اختر الجنسية"
-          error={fieldErrors.nationalityId}
-          accessibilityLabel="الجنسية"
-        />
-
-        <View style={styles.fieldBlock}>
-          <Text style={styles.fieldLabel}>تاريخ الميلاد *</Text>
-          <Pressable
-            style={[
-              styles.dateTrigger,
-              fieldErrors.dob ? styles.dateTriggerError : null,
-            ]}
-            onPress={() => setShowDobPicker(true)}
-            accessibilityLabel="تاريخ الميلاد"
-            accessibilityRole="button"
-          >
-            <Text
-              style={[styles.dateTriggerText, !dob && styles.datePlaceholder]}
-            >
-              {dob ? formatDateLabel(dob) : "اختر تاريخ الميلاد"}
-            </Text>
-            <MaterialCommunityIcons
-              name="calendar-month-outline"
-              size={20}
-              color={centerColors.textSecondary}
-            />
-          </Pressable>
-          {fieldErrors.dob ? (
-            <Text style={styles.fieldError}>{fieldErrors.dob}</Text>
+    <Screen
+      scrollKey={step}
+      header={<Header title="تسجيل طالبة جديدة" onBack={back} />}
+      footer={
+        <View style={styles.footer}>
+          {step > 0 ? (
+            <Button variant="secondary" onPress={() => setStep(step - 1)} style={styles.footerBack} disabled={mutation.isPending}>
+              السابق
+            </Button>
           ) : null}
-          {showDobPicker ? (
-            <DateTimePicker
-              value={dob ?? new Date(2010, 4, 15)}
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
+          <Button
+            onPress={next}
+            loading={mutation.isPending}
+            style={styles.flex}
+            icon={step === STEPS.length - 1 ? "send" : undefined}
+            size="lg"
+          >
+            {step === STEPS.length - 1 ? "إرسال الطلب" : "التالي"}
+          </Button>
+        </View>
+      }
+    >
+      <Steps steps={STEPS} current={step} />
+
+      <View style={styles.form}>
+        {mutation.isError ? <Banner tone="danger" title="تعذّر إرسال الطلب">{(mutation.error as Error).message}</Banner> : null}
+
+        {step === 0 ? (
+          <>
+            <TextField
+              label="الاسم الكامل"
+              required
+              value={form.fullName}
+              onChangeText={(v) => set("fullName", v)}
+              placeholder="الاسم كما في البطاقة المدنية"
+              autoComplete="name"
+              textContentType="name"
+              error={errors.fullName}
+            />
+            <TextField
+              label="الرقم المدني"
+              required
+              value={form.idNumber}
+              onChangeText={(v) => set("idNumber", toLatinDigits(v).slice(0, CIVIL_ID_LENGTH))}
+              keyboardType="number-pad"
+              placeholder="12 رقماً"
+              maxLength={CIVIL_ID_LENGTH}
+              ltr
+              icon="card-account-details-outline"
+              error={errors.idNumber}
+            />
+            <ChoiceChips
+              label="الجنس"
+              required
+              options={GENDER_OPTIONS}
+              value={form.gender}
+              onChange={(v: Gender) => {
+                set("gender", v);
+                set("centerId", null);
+                set("levelId", null);
+                set("courseIds", []);
+              }}
+              error={errors.gender}
+            />
+            <SelectField
+              label="الجنسية"
+              required
+              options={NATIONALITY_OPTIONS}
+              value={form.nationality}
+              onChange={(v) => set("nationality", v)}
+              error={errors.nationality}
+            />
+            <DateField
+              label="تاريخ الميلاد"
+              required
+              value={form.dob}
+              onChange={(d) => set("dob", d)}
               maximumDate={new Date()}
-              onChange={handleDobChange}
+              initialDate={new Date(1995, 0, 1)}
+              error={errors.dob}
             />
-          ) : null}
-          {Platform.OS === "ios" && showDobPicker ? (
-            <Pressable
-              style={styles.dateDoneButton}
-              onPress={() => setShowDobPicker(false)}
-            >
-              <Text style={styles.dateDoneText}>تم</Text>
-            </Pressable>
-          ) : null}
-        </View>
+            <SelectField
+              label="المؤهل الدراسي"
+              required
+              options={ACADEMIC_LEVEL_OPTIONS}
+              value={form.academicLevel}
+              onChange={(v) => set("academicLevel", v)}
+              error={errors.academicLevel}
+            />
+            <ChoiceChips
+              label="الوظيفة الحالية"
+              required
+              options={OCCUPATION_OPTIONS}
+              value={form.occupation}
+              onChange={(v: Occupation) => set("occupation", v)}
+              error={errors.occupation}
+            />
+            {form.occupation === "other" ? (
+              <TextField
+                label="اكتبي الوظيفة"
+                required
+                value={form.occupationOther}
+                onChangeText={(v) => set("occupationOther", v)}
+                error={errors.occupationOther}
+              />
+            ) : null}
+          </>
+        ) : null}
 
-        <SelectField
-          label="المستوى الدراسي"
-          required
-          value={academicLevelId}
-          options={ACADEMIC_LEVEL_OPTIONS}
-          onSelect={(id) => {
-            setAcademicLevelId(id);
-            clearFieldError("academicLevelId");
-          }}
-          placeholder="اختر المستوى الدراسي"
-          error={fieldErrors.academicLevelId}
-          accessibilityLabel="المستوى الدراسي"
-        />
-
-        <Input
-          label="رقم الهاتف"
-          required
-          value={phone}
-          onChangeText={(text) => {
-            setPhone(text);
-            clearFieldError("phone");
-          }}
-          placeholder="05XXXXXXXX"
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          accessibilityLabel="رقم الهاتف"
-          error={fieldErrors.phone}
-        />
-
-        <Input
-          label="كلمة المرور"
-          required
-          value={password}
-          onChangeText={(text) => {
-            setPassword(filterDigitsOnly(text));
-            clearFieldError("password");
-          }}
-          placeholder="أرقام فقط — 6 على الأقل"
-          secureTextEntry
-          keyboardType="number-pad"
-          autoComplete="new-password"
-          accessibilityLabel="كلمة المرور"
-          error={fieldErrors.password}
-        />
-
-        <Text style={styles.fieldLabel}>مسار الانضمام *</Text>
-        <View style={styles.filterRow}>
-          {ENROLLMENT_TRACK_OPTIONS.map((option) => {
-            const selected = track === option.id;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => {
-                  setTrack(option.id);
-                  clearFieldError("track");
+        {step === 1 ? (
+          <>
+            <PhoneField
+              required
+              country={country}
+              onCountryChange={setCountry}
+              value={form.phone}
+              onChangeText={(v) => set("phone", v)}
+              error={errors.phone}
+              hint="يُستخدم لتسجيل الدخول والتواصل"
+            />
+            <Card padding={4} style={styles.group}>
+              <Text variant="bodyStrong">عنوان السكن</Text>
+              <TextField
+                label="المنطقة"
+                required
+                value={form.address.area}
+                onChangeText={(v) => {
+                  set("address", { ...form.address, area: v });
+                  if (errors.area) setErrors((p) => ({ ...p, area: undefined }));
                 }}
-                style={[styles.filterChip, selected && styles.filterChipSelected]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={`مسار ${option.label}`}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    selected && styles.filterChipTextSelected,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {fieldErrors.track ? (
-          <Text style={styles.fieldError}>{fieldErrors.track}</Text>
+                placeholder="مثال: السالمية"
+                error={errors.area}
+              />
+              <View style={styles.row}>
+                <TextField
+                  label="القطعة"
+                  value={form.address.block}
+                  onChangeText={(v) => set("address", { ...form.address, block: v })}
+                  keyboardType="number-pad"
+                  containerStyle={styles.flex}
+                />
+                <TextField
+                  label="الشارع"
+                  value={form.address.street}
+                  onChangeText={(v) => set("address", { ...form.address, street: v })}
+                  containerStyle={styles.flex}
+                />
+              </View>
+              <View style={styles.row}>
+                <TextField
+                  label="الجادة"
+                  value={form.address.avenue}
+                  onChangeText={(v) => set("address", { ...form.address, avenue: v })}
+                  containerStyle={styles.flex}
+                />
+                <TextField
+                  label="المنزل"
+                  value={form.address.house}
+                  onChangeText={(v) => set("address", { ...form.address, house: v })}
+                  containerStyle={styles.flex}
+                />
+              </View>
+            </Card>
+            <TextField
+              label="كلمة المرور"
+              required
+              value={form.password}
+              onChangeText={(v) => set("password", toLatinDigits(v))}
+              secureTextEntry
+              keyboardType="number-pad"
+              textContentType="newPassword"
+              hint={PASSWORD_HINT}
+              error={errors.password}
+            />
+            <TextField
+              label="تأكيد كلمة المرور"
+              required
+              value={form.confirmPassword}
+              onChangeText={(v) => set("confirmPassword", toLatinDigits(v))}
+              secureTextEntry
+              keyboardType="number-pad"
+              error={errors.confirmPassword}
+            />
+          </>
         ) : null}
 
-        <Text style={styles.fieldLabel}>الجنس *</Text>
-        <View style={styles.filterRow}>
-          {STUDENT_GENDER_OPTIONS.map((option) => {
-            const selected = gender === option.id;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => handleGenderSelect(option.id)}
-                style={[styles.filterChip, selected && styles.filterChipSelected]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={`الجنس ${option.label}`}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    selected && styles.filterChipTextSelected,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {fieldErrors.gender ? (
-          <Text style={styles.fieldError}>{fieldErrors.gender}</Text>
-        ) : null}
-
-        {!gender ? (
-          <Text style={styles.centerHint}>اختاري الجنس أولاً لعرض المراكز المناسبة</Text>
-        ) : centersLoading ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.inlineLoadingText}>جاري تحميل المراكز...</Text>
-          </View>
-        ) : (
+        {step === 2 ? (
           <>
             <SelectField
               label="المركز"
               required
-              value={centerId}
-              options={centerOptions}
-              onSelect={handleCenterSelect}
-              placeholder={
-                centerOptions.length > 0 ? "اختر المركز" : "لا توجد مراكز لهذا الجنس"
-              }
-              disabled={centerOptions.length === 0}
-              error={fieldErrors.centerId}
-              accessibilityLabel="المركز"
+              options={(centersQuery.data ?? []).map((c) => ({
+                id: c.id,
+                label: c.nameAr,
+                description: [CENTER_AUDIENCE_LABELS[c.genderAudience], c.city].filter(Boolean).join(" · "),
+              }))}
+              value={form.centerId}
+              onChange={(id) => {
+                set("centerId", id);
+                set("levelId", null);
+                set("courseIds", []);
+              }}
+              placeholder={centersQuery.isLoading ? "جاري تحميل المراكز…" : "اختاري المركز"}
+              disabled={centersQuery.isLoading}
+              emptyText="لا توجد مراكز متاحة حالياً"
+              error={errors.centerId ?? (centersQuery.isError ? "تعذّر تحميل المراكز" : undefined)}
+            />
+            {selectedCenter && hasCenterLocation(selectedCenter) ? (
+              <Card tone="primary" padding={3} onPress={() => openCenterInMaps(selectedCenter)} style={styles.centerCard}>
+                <MaterialCommunityIcons name="map-marker-outline" size={20} color={colors.primary} />
+                <Text variant="caption" style={styles.flex} numberOfLines={2}>
+                  {[selectedCenter.addressText, selectedCenter.city].filter(Boolean).join("، ")}
+                </Text>
+                <Text variant="label" color="primary">
+                  الخرائط
+                </Text>
+              </Card>
+            ) : null}
+
+            <ChoiceCards
+              label="مسار الانضمام"
+              required
+              options={TRACK_OPTIONS}
+              value={form.track}
+              onChange={(v) => {
+                set("track", v);
+                set("levelId", null);
+              }}
+              error={errors.track}
             />
 
-            {selectedCenter ? (
-              <View style={styles.centerAddressCard}>
-                <Text style={styles.centerAddressTitle}>
-                  {selectedCenter.nameAr}
-                  {" · "}
-                  {GENDER_AUDIENCE_LABELS[selectedCenter.genderAudience]}
-                </Text>
-                {selectedCenter.city ? (
-                  <Text style={styles.centerAddressCity}>{selectedCenter.city}</Text>
-                ) : null}
-                {selectedCenter.addressText ? (
-                  <Text style={styles.centerAddressText}>
-                    {selectedCenter.addressText}
-                  </Text>
-                ) : (
-                  <Text style={styles.centerAddressMuted}>لا يوجد عنوان مسجّل بعد</Text>
-                )}
-                {hasCenterLocation(selectedCenter) ? (
-                  <Pressable
-                    onPress={() =>
-                      openCenterInMaps({
-                        addressText: selectedCenter.addressText,
-                        city: selectedCenter.city,
-                        nameAr: selectedCenter.nameAr,
-                      })
-                    }
-                    style={styles.mapsButton}
-                    accessibilityRole="link"
-                    accessibilityLabel="افتح موقع المركز في الخرائط"
-                  >
-                    <MaterialCommunityIcons
-                      name="map-marker-outline"
-                      size={18}
-                      color={colors.primary}
-                    />
-                    <Text style={styles.mapsButtonText}>افتح في الخرائط</Text>
-                  </Pressable>
-                ) : null}
-              </View>
+            {trackRequiresLevel(form.track) ? (
+              <SelectField
+                label={form.track === "preparatory" ? "مستوى التمهيدي" : "مستوى المطور"}
+                required
+                options={levelOptions}
+                value={form.levelId}
+                onChange={(v) => set("levelId", v)}
+                disabled={!form.centerId || levelsQuery.isLoading}
+                placeholder={!form.centerId ? "اختاري المركز أولاً" : "اختاري المستوى"}
+                error={errors.levelId}
+              />
             ) : null}
+
+            {form.track === "other" ? (
+              <TextField
+                label="وضّحي المسار"
+                required
+                value={form.trackNote}
+                onChangeText={(v) => set("trackNote", v)}
+                placeholder="مثال: حلقة تلاوة مسائية"
+                error={errors.trackNote}
+              />
+            ) : null}
+
+            {form.centerId && (courseOptions.length > 0 || form.track === "courses") ? (
+              <SelectField
+                multiple
+                label="الدورات العلمية"
+                required={form.track === "courses"}
+                options={courseOptions}
+                value={form.courseIds}
+                onChange={(ids) => set("courseIds", ids)}
+                placeholder={courseOptions.length ? "اختاري دورة أو أكثر" : "لا توجد دورات في هذا المركز"}
+                disabled={courseOptions.length === 0}
+                hint={form.track !== "courses" ? "اختياري — الاشتراك في دورة لا يمنع التسجيل في المطور أو التمهيدي" : undefined}
+                error={errors.courseIds}
+              />
+            ) : null}
+
+            <ChoiceChips
+              label="حالة الطالبة"
+              required
+              options={STUDENT_TYPE_OPTIONS}
+              value={form.studentType}
+              onChange={(v: StudentType) => set("studentType", v)}
+              error={errors.studentType}
+            />
+
+            <TextField
+              label="ملاحظات"
+              value={form.notes}
+              onChangeText={(v) => set("notes", v)}
+              placeholder="مثال: مقدار الحفظ السابق، أوقات مناسبة، احتياجات خاصة…"
+              multiline
+              maxLength={1000}
+              showCounter
+            />
           </>
-        )}
+        ) : null}
 
-        {levelsLoading ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.inlineLoadingText}>جاري تحميل المستويات...</Text>
-          </View>
-        ) : (
-          <SelectField
-            label="مستوى الحفظ"
-            required
-            value={memorizationLevelId}
-            options={memorizationLevelOptions}
-            onSelect={(id) => {
-              setMemorizationLevelId(id);
-              clearFieldError("memorizationLevelId");
-            }}
-            placeholder={
-              !centerId
-                ? "اختر المركز أولاً"
-                : memorizationLevelOptions.length > 0
-                  ? "اختر مستوى الحفظ"
-                  : "لا توجد مستويات لهذا المركز"
-            }
-            disabled={!centerId || memorizationLevelOptions.length === 0}
-            error={fieldErrors.memorizationLevelId}
-            accessibilityLabel="مستوى الحفظ"
-          />
-        )}
+        {step === 3 ? (
+          <>
+            <Text variant="caption" color="textSecondary">
+              ارفعي صوراً واضحة — تُضغط تلقائياً قبل الإرسال ولا يطّلع عليها إلا إدارة المركز.
+            </Text>
+            {(["civilId", "photo", "qualification"] as DocumentKind[])
+              .filter((kind) => kind !== "qualification" || qualificationRequired)
+              .map((kind) => (
+                <ImagePickerField
+                  key={kind}
+                  label={DOCUMENT_META[kind].label}
+                  description={DOCUMENT_META[kind].description}
+                  icon={DOCUMENT_META[kind].icon}
+                  required
+                  value={docs[kind]}
+                  onChange={(img) => {
+                    setDocs((prev) => ({ ...prev, [kind]: img }));
+                    if (errors[kind]) setErrors((p) => ({ ...p, [kind]: undefined }));
+                  }}
+                  aspect={kind === "photo" ? [3, 4] : undefined}
+                  error={errors[kind]}
+                />
+              ))}
 
-        <View style={styles.buttonWrapper}>
-          <Button
-            onPress={handleSubmit}
-            loading={submitMutation.isPending}
-            disabled={submitMutation.isPending || centersLoading}
-            accessibilityLabel="إرسال الطلب"
-          >
-            إرسال الطلب
-          </Button>
-        </View>
-
-        <Pressable
-          onPress={() => router.replace("/(auth)/login" as Href)}
-          style={styles.loginLink}
-          accessibilityLabel="الانتقال إلى تسجيل الدخول"
-          accessibilityRole="link"
-        >
-          <Text style={styles.loginLinkText}>لديك حساب؟ سجّل دخول</Text>
-        </Pressable>
-      </ScrollView>
-    </ScreenContainer>
+            <Card padding={4}>
+              <Text variant="headline" style={styles.reviewTitle}>
+                مراجعة الطلب
+              </Text>
+              <InfoRow label="الاسم" value={form.fullName} />
+              <InfoRow label="الرقم المدني" value={form.idNumber} />
+              <InfoRow label="الجنسية" value={nationalityLabel(form.nationality)} />
+              <InfoRow label="تاريخ الميلاد" value={form.dob ? formatDateLong(form.dob) : ""} />
+              <InfoRow label="المؤهل" value={academicLevelLabel(form.academicLevel)} />
+              <InfoRow label="الوظيفة" value={occupationLabel(form.occupation, form.occupationOther)} />
+              <InfoRow label="الهاتف" value={formatPhone(toInternational(form.phone, country))} />
+              <InfoRow label="السكن" value={formatAddress(form.address)} />
+              <InfoRow label="المركز" value={selectedCenter?.nameAr} />
+              <InfoRow
+                label="المسار"
+                value={[
+                  form.track ? TRACK_LABELS[form.track] : "",
+                  levelOptions.find((l) => l.id === form.levelId)?.label,
+                ]
+                  .filter(Boolean)
+                  .join(" — ")}
+              />
+              <InfoRow
+                label="الدورات"
+                value={courseOptions.filter((c) => form.courseIds.includes(c.id)).map((c) => c.label).join("، ")}
+              />
+              <InfoRow
+                label="الحالة"
+                value={STUDENT_TYPE_OPTIONS.find((o) => o.id === form.studentType)?.label}
+                last
+              />
+            </Card>
+          </>
+        ) : null}
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: spacing.xxl },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  backButton: {
-    padding: spacing.xs,
-    marginStart: -spacing.xs,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.text,
-    textAlign: "center",
-  },
-  headerDots: { flexDirection: "row", gap: spacing.sm },
-  dot: { width: 12, height: 12, borderRadius: 6 },
-  dotGreen: { backgroundColor: centerColors.cardBorder },
-  dotYellow: { backgroundColor: centerColors.cardBorder },
-  dotRed: { backgroundColor: centerColors.cardBorder },
-  logoBox: {
-    width: 120,
-    height: 120,
-    borderRadius: 16,
-    backgroundColor: centerColors.surfaceMuted,
-    alignSelf: "center",
+  flex: { flex: 1 },
+  form: { gap: space[5], marginTop: space[5] },
+  row: { flexDirection: "row", gap: space[3] },
+  group: { gap: space[4] },
+  footer: { flexDirection: "row", gap: space[3] },
+  footerBack: { minWidth: 100 },
+  centerCard: { flexDirection: "row", alignItems: "center", gap: space[2], marginTop: -space[2] },
+  reviewTitle: { marginBottom: space[1] },
+  success: { alignItems: "center", gap: space[4], paddingTop: space[10] },
+  successIcon: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.sm,
+    marginBottom: space[2],
   },
-  logoTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: colors.text,
-    textAlign: "center",
-    marginBottom: spacing.xs,
-  },
-  logoSubtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: "center",
-    marginBottom: spacing.lg,
-  },
-  infoBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: centerColors.surfaceMuted,
-    borderRadius: 10,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  infoBannerText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.textSecondary,
-    textAlign: "right",
-    lineHeight: 20,
-  },
-  formError: {
-    color: colors.error,
-    fontSize: 14,
-    marginBottom: spacing.md,
-    textAlign: "center",
-  },
-  inlineLoading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  inlineLoadingText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    justifyContent: "flex-end",
-    marginBottom: spacing.md,
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 20,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    backgroundColor: centerColors.surfaceMuted,
-  },
-  filterChipSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: colors.text,
-  },
-  filterChipTextSelected: {
-    color: "#fff",
-  },
-  centerHint: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    textAlign: "right",
-    marginBottom: spacing.md,
-  },
-  centerAddressCard: {
-    backgroundColor: centerColors.surfaceMuted,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    gap: spacing.xs,
-  },
-  centerAddressTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.text,
-    textAlign: "right",
-  },
-  centerAddressCity: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.primary,
-    textAlign: "right",
-  },
-  centerAddressText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    textAlign: "right",
-    lineHeight: 20,
-  },
-  centerAddressMuted: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    textAlign: "right",
-  },
-  mapsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  mapsButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.primary,
-  },
-  fieldBlock: {
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: colors.text,
-    marginBottom: spacing.xs,
-    textAlign: "right",
-  },
-  dateTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    minHeight: 48,
-    backgroundColor: colors.background,
-  },
-  dateTriggerError: {
-    borderColor: colors.error,
-  },
-  dateTriggerText: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-    textAlign: "right",
-  },
-  datePlaceholder: {
-    color: colors.textSecondary,
-  },
-  fieldError: {
-    marginTop: spacing.xs,
-    fontSize: 13,
-    color: colors.error,
-    textAlign: "right",
-  },
-  dateDoneButton: {
-    alignSelf: "flex-end",
-    marginTop: spacing.sm,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-  },
-  dateDoneText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  buttonWrapper: { marginTop: spacing.sm },
-  loginLink: {
-    marginTop: spacing.xl,
-    alignSelf: "center",
-    padding: spacing.sm,
-  },
-  loginLinkText: {
-    fontSize: 16,
-    color: colors.primary,
-    fontWeight: "500",
-  },
+  successCard: { alignSelf: "stretch", marginTop: space[4], borderRadius: radius.lg },
 });

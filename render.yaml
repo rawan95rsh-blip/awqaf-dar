@@ -21,3 +21,11 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: CENTER_TZ_OFFSET_MINUTES
+        value: "180"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false

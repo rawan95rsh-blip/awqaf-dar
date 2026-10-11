@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import {
+  CLASS_TRACK_LABELS_AR,
   isClassTrack,
-  isMutorLevelOrder,
   nextOccurrence,
   parseTimeHHMM,
   WEEKDAY_LABELS_AR,
@@ -25,12 +25,24 @@ const SUBJECT_NAMES_AR = [
   'النحو',
 ] as const;
 
-function resolveSubjectIndex(subjectName: string): number {
-  const trimmed = subjectName.trim();
-  const exact = SUBJECT_NAMES_AR.findIndex((name) => name === trimmed);
+function minutesOfTime(time: { hours: number; minutes: number }): number {
+  return time.hours * 60 + time.minutes;
+}
+
+/** يوحّد الكتابة: «القرآن» = «القران»، ويحذف «ال» التعريف للمقارنة */
+function normalizeArabic(value: string): string {
+  return value.trim().replace(/[آأإ]/g, 'ا').replace(/[ًٌٍَُِّْ]/g, '');
+}
+
+function resolveSubjectIndex(subjectName: string, explicitIndex?: unknown): number {
+  if (typeof explicitIndex === 'number' && Number.isInteger(explicitIndex) && explicitIndex >= 0 && explicitIndex < SUBJECT_COUNT) {
+    return explicitIndex;
+  }
+  const trimmed = normalizeArabic(subjectName);
+  const exact = SUBJECT_NAMES_AR.findIndex((name) => normalizeArabic(name) === trimmed);
   if (exact >= 0) return exact;
   const partial = SUBJECT_NAMES_AR.findIndex(
-    (name) => trimmed.includes(name) || name.includes(trimmed)
+    (name) => trimmed.includes(normalizeArabic(name)) || normalizeArabic(name).includes(trimmed)
   );
   return partial >= 0 ? partial : 0;
 }
@@ -153,7 +165,6 @@ export async function listClassOffers(req: Request, res: Response): Promise<void
         return;
       }
       filter.levelId = levelId;
-      filter.track = 'mutor';
     }
 
     const offers = await ClassOffer.find(filter).sort({ createdAt: -1 }).lean();
@@ -234,7 +245,7 @@ export async function createClassOffer(req: Request, res: Response): Promise<voi
     };
 
     if (!track || !isClassTrack(track)) {
-      sendError(res, 'نوع الفصل مطلوب — مطور أو دورة', 400);
+      sendError(res, 'نوع الفصل مطلوب — تمهيدي أو مطور أو دورة', 400);
       return;
     }
 
@@ -274,9 +285,10 @@ export async function createClassOffer(req: Request, res: Response): Promise<voi
     let levelObjectId: mongoose.Types.ObjectId | null = null;
     let levelLabel: string | null = null;
 
-    if (track === 'mutor') {
+    if (track === 'mutor' || track === 'preparatory') {
+      const trackLabel = track === 'mutor' ? 'مطور' : 'تمهيدي';
       if (!levelId || typeof levelId !== 'string' || !mongoose.isValidObjectId(levelId)) {
-        sendError(res, 'فصل المطور يتطلب اختيار مستوى مطور (١–٨)', 400);
+        sendError(res, `فصل ال${trackLabel} يتطلب اختيار مستوى ${trackLabel}`, 400);
         return;
       }
       const level = await Level.findOne({ _id: levelId, centerId: req.user.centerId });
@@ -284,8 +296,8 @@ export async function createClassOffer(req: Request, res: Response): Promise<voi
         sendError(res, 'المستوى غير موجود في هذا المركز', 400);
         return;
       }
-      if (!isMutorLevelOrder(level.order)) {
-        sendError(res, 'يجب اختيار مستوى مطور من ١ إلى ٨', 400);
+      if ((level.track ?? 'mutor') !== track) {
+        sendError(res, `المستوى المختار ليس من مستويات ال${trackLabel}`, 400);
         return;
       }
       levelObjectId = level._id;
@@ -295,7 +307,31 @@ export async function createClassOffer(req: Request, res: Response): Promise<voi
       return;
     }
 
-    const subjectIndex = resolveSubjectIndex(subjectName);
+    if (minutesOfTime(parsedEnd) <= minutesOfTime(parsedStart)) {
+      sendError(res, 'وقت النهاية يجب أن يكون بعد وقت البداية', 400);
+      return;
+    }
+
+    // فصول المستوى الواحد لا تتداخل في نفس اليوم (الدورات العامة مستثناة)
+    const clash = levelObjectId
+      ? await ClassOffer.findOne({
+          centerId: req.user.centerId,
+          levelId: levelObjectId,
+          weekday,
+          startTime: { $lt: parsedEnd.formatted },
+          endTime: { $gt: parsedStart.formatted },
+        }).lean()
+      : null;
+    if (clash) {
+      sendError(
+        res,
+        `يتعارض مع فصل «${clash.subjectName}» في نفس اليوم (${clash.startTime}–${clash.endTime})`,
+        409
+      );
+      return;
+    }
+
+    const subjectIndex = resolveSubjectIndex(subjectName, (req.body as { subjectIndex?: unknown }).subjectIndex);
     if (subjectIndex < 0 || subjectIndex >= SUBJECT_COUNT) {
       sendError(res, 'فهرس المادة غير صالح', 400);
       return;
@@ -317,7 +353,7 @@ export async function createClassOffer(req: Request, res: Response): Promise<voi
     });
 
     const { startAt, endAt } = nextOccurrence(weekday, parsedStart, parsedEnd);
-    const trackLabel = track === 'mutor' ? 'مطور' : 'دورة';
+    const trackLabel = CLASS_TRACK_LABELS_AR[track as ClassTrack];
     const session = await Session.create({
       centerId: req.user.centerId,
       levelId: levelObjectId,

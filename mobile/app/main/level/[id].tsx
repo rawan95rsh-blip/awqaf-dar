@@ -1,613 +1,338 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  I18nManager,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
-import { centerColors, spacing } from "@/constants";
-import { SUBJECT_NAMES } from "@/src/constants/subjects";
+import { radius, space } from "@/src/theme";
 import {
-  fetchLevelById,
-  fetchLevelStudents,
-  levelQueryKeys,
-} from "@/src/api/levels";
-import {
-  classOffersQueryKeys,
-  listClassOffers,
-} from "@/src/api/classOffers";
-import { goBack } from "@/src/utils/navigation";
-import type { StudentListItem, StudentStatus } from "@/src/types/student";
-import { MODE_LABELS, TRACK_LABELS } from "@/src/types/classOffer";
-import { ENROLLMENT_STATUS_LABELS } from "@/src/constants/enrollment";
-import { exportRowsToExcel } from "@/src/utils/exportExcel";
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Header,
+  IconButton,
+  LoadingState,
+  Screen,
+  SearchBar,
+  Section,
+  Skeleton,
+  SkeletonList,
+  StatTile,
+  Text,
+  useToast,
+} from "@/src/ui";
+import WeeklySchedule from "@/src/components/WeeklySchedule";
+import ClassOfferCard from "@/src/components/levels/ClassOfferCard";
+import ClassOfferActionsSheet from "@/src/components/levels/ClassOfferActionsSheet";
+import GradesheetCard from "@/src/components/levels/GradesheetCard";
+import LevelStudentRow from "@/src/components/levels/LevelStudentRow";
+import SubjectGrid from "@/src/components/levels/SubjectGrid";
+import { TRACK_ICONS, studentsCountLabel } from "@/src/components/levels/helpers";
+import { useAuth } from "@/src/context/AuthContext";
+import { fetchLevelById, fetchLevelStudents, levelQueryKeys } from "@/src/api/levels";
+import { classOffersQueryKeys, listClassOffers } from "@/src/api/classOffers";
+import { PERFORMANCE, STUDENT_TYPE_LABELS, TRACK_LABELS } from "@/src/constants/domain";
+import { formatPhone } from "@/src/constants/phone";
+import type { ClassOfferItem } from "@/src/types/classOffer";
+import type { StudentListItem } from "@/src/types/student";
+import { exportWorkbook } from "@/src/utils/excel";
 
-function isMutorLadderOrder(order: number | undefined): boolean {
-  return typeof order === "number" && order >= 1 && order <= 8;
+function average(values: Array<number | null>): number | null {
+  const nums = values.filter((v): v is number => v != null);
+  if (!nums.length) return null;
+  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
-const DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"];
-const TIME_SLOTS = ["08:00", "09:30", "11:00", "12:30"];
-
-const PILL_COLORS = [
-  { bg: "#dbeafe", text: "#1e40af" },
-  { bg: "#dcfce7", text: "#166534" },
-  { bg: "#fce7f3", text: "#9d174d" },
-  { bg: "#dbeafe", text: "#1e40af" },
-  { bg: "#dcfce7", text: "#166534" },
-  { bg: "#fce7f3", text: "#9d174d" },
-  { bg: "#e0e7ff", text: "#3730a3" },
-];
-
-function getMockSchedule(): number[][] {
-  return [
-    [0, 1, 2, 3],
-    [4, 0, 5, -1],
-    [1, 2, 6, 0],
-    [3, 4, -1, 1],
-    [-1, 5, 2, 4],
-  ];
-}
-
-const STUDENT_STATUS = {
-  regular: { label: "منتظمة", bg: centerColors.accentGreen, text: centerColors.textOnAccent },
-  excellent: { label: "متفوقة", bg: centerColors.accentGreen, text: centerColors.textOnAccent },
-  warning: { label: "تحذير", bg: centerColors.accentYellow, text: centerColors.text },
-  frequent_absence: { label: "غياب متكرر", bg: centerColors.accentRed, text: centerColors.textOnAccent },
-} as const;
-
-const STUDENT_TABLE_HEADERS = ["#", "اسم الطالب", "الهوية المدنية", "الحضور", "الدرجة", "الحالة"];
-
-function formatMetric(value: number | null): string {
-  return value == null ? "—" : String(value);
-}
-
-function formatAttendance(value: number | null): string {
-  return value == null ? "—" : `${value}%`;
-}
-
-export default function LevelDetailScreen() {
+/** صفحة الفصل/المستوى (مثل «مطور أول») — تعمل لمستويات التمهيدي والمطور */
+export default function LevelScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const levelId = id ?? "";
-  const schedule = getMockSchedule();
+  const router = useRouter();
+  const toast = useToast();
+  const { user } = useAuth();
+  const centerName = user?.centerProfile?.nameAr ?? "المركز";
 
-  const {
-    data: level,
-    isLoading: levelLoading,
-    isError: levelError,
-    error: levelErrorObj,
-  } = useQuery({
+  const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [menuOffer, setMenuOffer] = useState<ClassOfferItem | null>(null);
+
+  const levelQuery = useQuery({
     queryKey: levelQueryKeys.detail(levelId),
     queryFn: () => fetchLevelById(levelId),
     enabled: !!levelId,
   });
-
-  const isMutorLevel = isMutorLadderOrder(level?.order);
-
-  useEffect(() => {
-    if (!level || levelLoading) return;
-    if (!isMutorLadderOrder(level.order)) {
-      router.replace("/main/classes" as Href);
-    }
-  }, [level, levelLoading, router]);
-
-  const {
-    data: students = [],
-    isLoading: studentsLoading,
-    isError: studentsError,
-  } = useQuery({
+  const studentsQuery = useQuery({
     queryKey: levelQueryKeys.students(levelId),
     queryFn: () => fetchLevelStudents(levelId),
-    enabled: !!levelId && isMutorLevel,
+    enabled: !!levelId,
+  });
+  // نفس مفتاح الجدول الأسبوعي لمشاركة الذاكرة المؤقتة
+  const offersQuery = useQuery({
+    queryKey: classOffersQueryKeys.list({ levelId }),
+    queryFn: () => listClassOffers({ levelId }),
+    enabled: !!levelId,
   });
 
-  const {
-    data: mutorClassOffers = [],
-    isLoading: offersLoading,
-  } = useQuery({
-    queryKey: classOffersQueryKeys.list({ levelId, track: "mutor" }),
-    queryFn: () => listClassOffers({ levelId, track: "mutor" }),
-    enabled: !!levelId && isMutorLevel,
-  });
+  const students = useMemo(() => studentsQuery.data ?? [], [studentsQuery.data]);
+  const offers = useMemo(
+    () =>
+      [...(offersQuery.data ?? [])].sort(
+        (a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime)
+      ),
+    [offersQuery.data]
+  );
+  const filtered = useMemo(() => {
+    const q = search.trim();
+    if (!q) return students;
+    return students.filter((s) => s.fullName.includes(q) || s.idNumber.includes(q));
+  }, [students, search]);
 
-  const studentCount = level?.studentCount ?? students.length;
-  const [exporting, setExporting] = useState(false);
+  const level = levelQuery.data;
+  const levelName = level?.shortName || level?.fullName || "المستوى";
+  const addClassHref = `/main/add-class?levelId=${encodeURIComponent(levelId)}` as Href;
 
-  const handleExportExcel = async () => {
-    if (exporting) return;
-    if (students.length === 0) {
-      Alert.alert("تنبيه", "لا توجد بيانات للتصدير");
-      return;
+  const header = (
+    <Header
+      back={"/main/classes" as Href}
+      title={level ? levelName : "المستوى"}
+      subtitle={level?.fullName}
+      actions={
+        <IconButton
+          icon="calendar-plus"
+          accessibilityLabel="إضافة فصل لهذا المستوى"
+          variant="tonal"
+          onPress={() => router.push(addClassHref)}
+          disabled={!level}
+        />
+      }
+    />
+  );
+
+  if (levelQuery.isLoading) {
+    return (
+      <Screen header={header}>
+        <LoadingState label="جاري تحميل المستوى…" />
+      </Screen>
+    );
+  }
+
+  if (levelQuery.isError || !level) {
+    return (
+      <Screen header={header}>
+        <ErrorState
+          message={(levelQuery.error as Error | null)?.message ?? "لم يُعثر على المستوى"}
+          onRetry={() => levelQuery.refetch()}
+        />
+      </Screen>
+    );
+  }
+
+  const studentCount = studentsQuery.data ? students.length : level.studentCount;
+  const attendanceAvg = average(students.map((s) => s.attendancePercent));
+  const gradeAvg = average(students.map((s) => s.gradeAverage));
+  const attention = students.filter((s) => s.status === "warning" || s.status === "frequent_absence").length;
+
+  const openOffer = (offer: ClassOfferItem) => {
+    if (offer.nextSessionId) {
+      router.push(`/main/session/${offer.nextSessionId}` as Href);
+    } else {
+      toast.show("لا توجد حصة قادمة لهذا الفصل — تظهر الحصص في الجدول أسبوعياً", "info");
     }
+  };
+
+  const exportStudents = async () => {
     setExporting(true);
     try {
-      const rows = students.map((s) => ({
-        الاسم: s.fullName,
-        "رقم الهوية": s.idNumber,
-        الهاتف: s.phone,
-        المستوى: s.levelName || s.levelShortName,
-        "حالة القيد":
-          ENROLLMENT_STATUS_LABELS[
-            (s.enrollmentStatus ?? "enrolled") as keyof typeof ENROLLMENT_STATUS_LABELS
-          ] ?? s.enrollmentStatus,
-        الحضور: s.attendancePercent ?? "",
-        المعدل: s.gradeAverage ?? "",
-      }));
-      const label = level?.shortName || level?.fullName || "level";
-      await exportRowsToExcel(rows, `level_${label}_${Date.now()}`, "طلاب المستوى");
-    } catch (err) {
-      Alert.alert(
-        "خطأ",
-        err instanceof Error ? err.message : "تعذر تصدير الملف"
+      await exportWorkbook(
+        [
+          {
+            name: "طالبات المستوى",
+            title: `قائمة طالبات ${levelName} — ${centerName}`,
+            subtitle: level.fullName,
+            columns: [
+              { header: "م", width: 5 },
+              { header: "اسم الطالبة", width: 28 },
+              { header: "الرقم المدني", width: 15 },
+              { header: "الهاتف", width: 16 },
+              { header: "مستجدة/مستمرة", width: 13 },
+              { header: "الحضور %", width: 10 },
+              { header: "المعدل", width: 9 },
+              { header: "الأداء", width: 14 },
+            ],
+            rows: students.map((s: StudentListItem, i) => [
+              i + 1,
+              s.fullName,
+              s.idNumber,
+              formatPhone(s.phone).replace("‎", ""),
+              s.studentType ? STUDENT_TYPE_LABELS[s.studentType] : "",
+              s.attendancePercent ?? "",
+              s.gradeAverage ?? "",
+              (PERFORMANCE[s.status] ?? PERFORMANCE.regular).label,
+            ]),
+          },
+        ],
+        `طالبات_${levelName}`
       );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "تعذّر التصدير");
     } finally {
       setExporting(false);
     }
   };
 
-  if (!levelLoading && level && !isMutorLevel) {
-    return (
-      <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-        <View style={styles.mainContent}>
-          <Text style={styles.errorText}>
-            هذا ليس مستوى مطور. الدورات العلمية تُفتح من قائمة الدورات.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <ScrollView
-        style={styles.main}
-        contentContainerStyle={styles.mainContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View
-          style={[
-            styles.topBar,
-            { justifyContent: I18nManager.isRTL ? "flex-end" : "flex-start" },
-          ]}
-        >
-          <Pressable
-            style={styles.backButton}
-            onPress={() => goBack(router, "/main/classes" as Href)}
-          >
-            <MaterialCommunityIcons
-              name={I18nManager.isRTL ? "chevron-right" : "chevron-left"}
-              size={24}
-              color={centerColors.text}
-            />
-            <Text style={styles.backButtonText}>المستويات</Text>
-          </Pressable>
+    <Screen
+      header={header}
+      refreshing={levelQuery.isRefetching || studentsQuery.isRefetching || offersQuery.isRefetching}
+      onRefresh={() => {
+        void levelQuery.refetch();
+        void studentsQuery.refetch();
+        void offersQuery.refetch();
+      }}
+    >
+      <View style={styles.hero}>
+        <Badge
+          label={`مسار ${TRACK_LABELS[level.track]} · المستوى ${level.order}`}
+          tone={level.track === "preparatory" ? "accent" : "primary"}
+          icon={TRACK_ICONS[level.track]}
+        />
+        <View style={styles.stats}>
+          <StatTile label="طالبة" value={studentCount} icon="account-group-outline" />
+          <StatTile
+            label="متوسط الحضور"
+            value={attendanceAvg == null ? "—" : `${attendanceAvg}%`}
+            icon="calendar-check-outline"
+            tone={attendanceAvg != null && attendanceAvg < 75 ? "warning" : "success"}
+          />
+          <StatTile
+            label="متوسط المعدل"
+            value={gradeAvg ?? "—"}
+            icon="chart-line"
+            tone="info"
+            hint={attention ? `${attention} تحتاج متابعة` : undefined}
+          />
         </View>
+      </View>
 
-        {levelLoading ? (
-          <ActivityIndicator size="large" color={centerColors.accent} style={styles.loader} />
-        ) : levelError ? (
-          <Text style={styles.errorText}>
-            {levelErrorObj instanceof Error ? levelErrorObj.message : "تعذر تحميل المستوى"}
+      <Section>
+        <GradesheetCard levelId={levelId} levelName={levelName} track={level.track} centerName={centerName} />
+      </Section>
+
+      <Section>
+        <WeeklySchedule levelId={levelId} scopeLabel={levelName} title={`جدول ${levelName}`} />
+      </Section>
+
+      <Section
+        title="الفصول"
+        subtitle="مواعيد أسبوعية ثابتة — اضغطي الفصل لفتح حصته القادمة"
+        action={{ label: "إضافة فصل", icon: "plus", onPress: () => router.push(addClassHref) }}
+      >
+        {offersQuery.isLoading ? (
+          <View style={styles.gap2}>
+            <Skeleton height={84} radiusSize={radius.lg} />
+            <Skeleton height={84} radiusSize={radius.lg} />
+          </View>
+        ) : offersQuery.isError ? (
+          <ErrorState compact message={(offersQuery.error as Error).message} onRetry={() => offersQuery.refetch()} />
+        ) : offers.length === 0 ? (
+          <Card>
+            <EmptyState
+              compact
+              icon="calendar-blank-outline"
+              title="لا فصول لهذا المستوى بعد"
+              description="أضيفي فصلاً (مادة + يوم + وقت + معلمة) ليتكرر في الجدول كل أسبوع"
+              actionLabel="إضافة فصل"
+              onAction={() => router.push(addClassHref)}
+            />
+          </Card>
+        ) : (
+          <View style={styles.gap2}>
+            {offers.map((offer) => (
+              <ClassOfferCard
+                key={offer.id}
+                offer={offer}
+                onPress={() => openOffer(offer)}
+                onMenu={() => setMenuOffer(offer)}
+              />
+            ))}
+          </View>
+        )}
+      </Section>
+
+      <Section title="المواد" subtitle="التحضير والدرجات لكل مادة">
+        <SubjectGrid
+          offers={offers}
+          onOpen={(subjectIndex) => router.push(`/main/subject/${levelId}/${subjectIndex}` as Href)}
+        />
+      </Section>
+
+      <Section title="قائمة الطالبات" subtitle={studentsCountLabel(studentCount)}>
+        {students.length > 0 ? (
+          <View style={styles.toolbar}>
+            {students.length > 8 ? (
+              <View style={styles.flex}>
+                <SearchBar value={search} onChangeText={setSearch} placeholder="ابحثي بالاسم أو الرقم المدني" />
+              </View>
+            ) : (
+              <View style={styles.flex} />
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="microsoft-excel"
+              loading={exporting}
+              onPress={exportStudents}
+              accessibilityLabel="تصدير قائمة الطالبات Excel"
+            >
+              Excel
+            </Button>
+          </View>
+        ) : null}
+        {studentsQuery.isLoading ? (
+          <SkeletonList rows={4} />
+        ) : studentsQuery.isError ? (
+          <ErrorState compact message={(studentsQuery.error as Error).message} onRetry={() => studentsQuery.refetch()} />
+        ) : students.length === 0 ? (
+          <Card>
+            <EmptyState
+              compact
+              icon="account-multiple-plus-outline"
+              title="لا توجد طالبات في هذا المستوى"
+              description="تظهر الطالبات هنا بعد قبول طلبات التسجيل أو تعيين المستوى من ملف الطالبة"
+              actionLabel="إضافة طالبة"
+              onAction={() => router.push("/main/add-student" as Href)}
+            />
+          </Card>
+        ) : filtered.length === 0 ? (
+          <Text variant="body" color="textSecondary" align="center" style={styles.noResults}>
+            لا نتائج مطابقة للبحث
           </Text>
         ) : (
-          <>
-            <Text style={styles.levelTitle}>{level?.fullName ?? "—"}</Text>
-            <Text style={styles.levelSubtitle}>{studentCount} طالب مسجل</Text>
-          </>
+          <Card padding={0} style={styles.listCard}>
+            {filtered.map((student, index) => (
+              <LevelStudentRow
+                key={student.id}
+                student={student}
+                index={index}
+                divider={index < filtered.length - 1}
+                onPress={() => router.push(`/main/student-profile/${student.id}` as Href)}
+              />
+            ))}
+          </Card>
         )}
+      </Section>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>الفصول</Text>
-            <Pressable
-              style={styles.addClassButton}
-              onPress={() =>
-                router.push(
-                  `/main/add-class?levelId=${encodeURIComponent(levelId)}` as import("expo-router").Href
-                )
-              }
-              disabled={!levelId}
-              accessibilityRole="button"
-              accessibilityLabel="إضافة فصل مطور"
-            >
-              <MaterialCommunityIcons name="plus" size={18} color={centerColors.primaryButtonText} />
-              <Text style={styles.addClassButtonText}>إضافة فصل مطور</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.sectionHint}>
-            فصول المطور المرتبطة بهذا المستوى. اضغطي البطاقة لفتح تفاصيل الحصة القادمة.
-          </Text>
-          {offersLoading ? (
-            <ActivityIndicator size="small" color={centerColors.accent} />
-          ) : mutorClassOffers.length === 0 ? (
-            <Text style={styles.emptyText}>لا توجد فصول مطور لهذا المستوى بعد</Text>
-          ) : (
-            <View style={styles.classList}>
-              {mutorClassOffers.map((offer) => (
-                <Pressable
-                  key={offer.id}
-                  style={styles.classCard}
-                  onPress={() => {
-                    if (!offer.nextSessionId) return;
-                    router.push(
-                      `/main/session/${offer.nextSessionId}` as import("expo-router").Href
-                    );
-                  }}
-                >
-                  <Text style={styles.classCardTitle}>{offer.subjectName}</Text>
-                  <Text style={styles.classCardMeta}>
-                    {TRACK_LABELS[offer.track]} · {MODE_LABELS[offer.mode]}
-                  </Text>
-                  <Text style={styles.classCardMeta}>
-                    {offer.weekdayLabel} · {offer.startTime} – {offer.endTime}
-                  </Text>
-                  <Text style={styles.classCardTeacher}>{offer.teacherName}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>المواد الدراسية (حضور ودرجات)</Text>
-          <View style={styles.cardsGrid}>
-            {SUBJECT_NAMES.map((name, i) => (
-              <Pressable
-                key={name}
-                style={styles.subjectCard}
-                onPress={() =>
-                  router.push(
-                    `/main/subject/${levelId}/${i}` as import("expo-router").Href
-                  )
-                }
-                disabled={!levelId}
-              >
-                <Text style={styles.subjectCardName}>{name}</Text>
-                <Text style={styles.subjectCardTeacher}>أ. —</Text>
-                <Text style={styles.subjectCardCount}>{studentCount} طالب مسجل</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>الجدول الأسبوعي (معاينة قديمة)</Text>
-          <View style={styles.tableWrap}>
-            <View style={styles.tableRow}>
-              <View style={[styles.tableCell, styles.tableHeader]}>
-                <Text style={styles.tableHeaderText}>الوقت</Text>
-              </View>
-              {DAYS.map((day) => (
-                <View
-                  key={day}
-                  style={[styles.tableCell, styles.tableHeader, styles.tableDayCell]}
-                >
-                  <Text style={styles.tableHeaderText}>{day}</Text>
-                </View>
-              ))}
-            </View>
-            {TIME_SLOTS.map((time, timeIdx) => (
-              <View key={time} style={styles.tableRow}>
-                <View style={[styles.tableCell, styles.timeCell]}>
-                  <Text style={styles.timeText}>{time}</Text>
-                </View>
-                {DAYS.map((_, dayIdx) => {
-                  const subIdx = schedule[dayIdx][timeIdx];
-                  const isEmpty = subIdx < 0;
-                  const colors = isEmpty
-                    ? { bg: centerColors.cardBg, text: centerColors.textSecondary }
-                    : PILL_COLORS[subIdx % PILL_COLORS.length];
-                  return (
-                    <View
-                      key={`${dayIdx}-${timeIdx}`}
-                      style={[styles.tableCell, styles.tableDayCell]}
-                    >
-                      <View style={[styles.pill, { backgroundColor: colors.bg }]}>
-                        <Text style={[styles.pillText, { color: colors.text }]}>
-                          {isEmpty ? "—" : SUBJECT_NAMES[subIdx]}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.studentListHeader}>
-            <Text style={styles.sectionTitle}>قائمة الطلاب ({studentCount} طالب)</Text>
-            <Pressable
-              style={[styles.exportButton, exporting && { opacity: 0.6 }]}
-              onPress={handleExportExcel}
-              disabled={exporting || studentsLoading}
-            >
-              {exporting ? (
-                <ActivityIndicator size="small" color={centerColors.primaryButtonText} />
-              ) : (
-                <MaterialCommunityIcons name="microsoft-excel" size={18} color={centerColors.primaryButtonText} />
-              )}
-              <Text style={styles.exportButtonText}>
-                {exporting ? "جاري التصدير…" : "تصدير Excel"}
-              </Text>
-            </Pressable>
-          </View>
-
-          {studentsLoading ? (
-            <ActivityIndicator size="small" color={centerColors.accent} />
-          ) : studentsError ? (
-            <Text style={styles.errorText}>تعذر تحميل قائمة الطلاب</Text>
-          ) : students.length === 0 ? (
-            <Text style={styles.emptyText}>لا يوجد طلاب في هذا المستوى</Text>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              style={styles.studentTableScroll}
-            >
-              <View style={styles.studentTableWrap}>
-                <View style={styles.tableRow}>
-                  {STUDENT_TABLE_HEADERS.map((h) => (
-                    <View
-                      key={h}
-                      style={[
-                        styles.studentTableCell,
-                        styles.studentTableHeaderCell,
-                        h === "#" && styles.studentCellNum,
-                        h === "الحالة" && styles.studentCellStatus,
-                      ]}
-                    >
-                      <Text style={styles.tableHeaderText}>{h}</Text>
-                    </View>
-                  ))}
-                </View>
-                {students.map((row: StudentListItem, i: number) => {
-                  const statusKey = row.status as StudentStatus;
-                  const status = STUDENT_STATUS[statusKey] ?? STUDENT_STATUS.regular;
-                  return (
-                    <View key={row.id} style={styles.tableRow}>
-                      <View style={[styles.studentTableCell, styles.studentCellNum]}>
-                        <Text style={styles.studentCellText}>{i + 1}</Text>
-                      </View>
-                      <View style={[styles.studentTableCell, styles.studentCellName]}>
-                        <Text style={styles.studentCellText} numberOfLines={1}>
-                          {row.fullName}
-                        </Text>
-                      </View>
-                      <View style={[styles.studentTableCell, styles.studentCellId]}>
-                        <Text style={styles.studentCellText}>{row.idNumber}</Text>
-                      </View>
-                      <View style={[styles.studentTableCell, styles.studentCellAtt]}>
-                        <Text style={styles.studentCellText}>
-                          {formatAttendance(row.attendancePercent)}
-                        </Text>
-                      </View>
-                      <View style={[styles.studentTableCell, styles.studentCellGrade]}>
-                        <Text style={styles.studentCellText}>
-                          {formatMetric(row.gradeAverage)}
-                        </Text>
-                      </View>
-                      <View style={[styles.studentTableCell, styles.studentCellStatus]}>
-                        <View style={[styles.statusPillStudent, { backgroundColor: status.bg }]}>
-                          <Text style={[styles.statusPillStudentText, { color: status.text }]}>
-                            {status.label}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      <ClassOfferActionsSheet offer={menuOffer} onClose={() => setMenuOffer(null)} />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: centerColors.background },
-  main: { flex: 1 },
-  mainContent: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  backButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: centerColors.text,
-    fontWeight: "600",
-  },
-  levelTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.xs,
-  },
-  levelSubtitle: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    marginBottom: spacing.xl,
-  },
-  loader: { marginBottom: spacing.lg },
-  errorText: {
-    fontSize: 14,
-    color: centerColors.accentRed,
-    marginBottom: spacing.lg,
-    textAlign: "center",
-  },
-  emptyText: {
-    fontSize: 14,
-    color: centerColors.textSecondary,
-    textAlign: "center",
-  },
-  section: { marginBottom: spacing.xl },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: spacing.md,
-  },
-  sectionTitleInline: {
-    marginBottom: 0,
-  },
-  sectionHint: {
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    lineHeight: 20,
-    marginBottom: spacing.md,
-  },
-  addClassButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: centerColors.primaryButton,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: 999,
-    gap: spacing.xs,
-  },
-  addClassButtonText: {
-    color: centerColors.primaryButtonText,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  classList: { gap: spacing.sm },
-  classCard: {
-    backgroundColor: centerColors.cardBg,
-    borderRadius: 14,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    marginBottom: spacing.sm,
-  },
-  classCardTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: centerColors.text,
-    marginBottom: 4,
-  },
-  classCardMeta: {
-    fontSize: 13,
-    color: centerColors.textSecondary,
-    marginBottom: 2,
-  },
-  classCardTeacher: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: centerColors.accent,
-    marginTop: 4,
-  },
-  cardsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginHorizontal: -spacing.xs,
-  },
-  subjectCard: {
-    width: "48%",
-    minWidth: 140,
-    marginHorizontal: "1%",
-    marginBottom: spacing.md,
-    backgroundColor: centerColors.cardBg,
-    borderRadius: 12,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-  },
-  subjectCardName: { fontSize: 14, fontWeight: "700", color: centerColors.text, marginBottom: 4 },
-  subjectCardTeacher: { fontSize: 12, color: centerColors.textSecondary, marginBottom: 2 },
-  subjectCardCount: { fontSize: 12, color: centerColors.accent, fontWeight: "600" },
-  tableWrap: {
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  tableRow: { flexDirection: "row" },
-  tableCell: {
-    padding: spacing.sm,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  tableHeader: { backgroundColor: centerColors.accent },
-  tableHeaderText: { color: centerColors.textOnAccent, fontSize: 12, fontWeight: "700" },
-  tableDayCell: { flex: 1, minWidth: 72 },
-  timeCell: { width: 56, backgroundColor: centerColors.cardBg },
-  timeText: { fontSize: 12, color: centerColors.textSecondary },
-  pill: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    alignSelf: "flex-start",
-  },
-  pillText: { fontSize: 11, fontWeight: "600" },
-  studentListHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  exportButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: centerColors.primaryButton,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: 10,
-    gap: spacing.xs,
-  },
-  exportButtonText: { color: centerColors.primaryButtonText, fontSize: 13, fontWeight: "600" },
-  studentTableScroll: { marginHorizontal: -spacing.lg },
-  studentTableWrap: {
-    borderWidth: 1,
-    borderColor: centerColors.cardBorder,
-    borderRadius: 12,
-    overflow: "hidden",
-    minWidth: 400,
-  },
-  studentTableCell: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    justifyContent: "center",
-  },
-  studentTableHeaderCell: { backgroundColor: centerColors.accent },
-  studentCellNum: { width: 32, minWidth: 32 },
-  studentCellName: { flex: 1.2, minWidth: 88 },
-  studentCellId: { width: 92, minWidth: 92 },
-  studentCellAtt: { width: 52, minWidth: 52 },
-  studentCellGrade: { width: 44, minWidth: 44 },
-  studentCellStatus: { width: 82, minWidth: 82 },
-  studentCellText: { fontSize: 12, color: centerColors.text },
-  statusPillStudent: {
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  statusPillStudentText: { fontSize: 10, fontWeight: "600" },
+  flex: { flex: 1 },
+  hero: { gap: space[3] },
+  stats: { flexDirection: "row", gap: space[3] },
+  gap2: { gap: space[2] },
+  toolbar: { flexDirection: "row", alignItems: "center", gap: space[2] },
+  listCard: { overflow: "hidden" },
+  noResults: { paddingVertical: space[6] },
 });
