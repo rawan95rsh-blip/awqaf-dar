@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 import { connectDB } from './config/db';
 import { runStartupMigrations } from './utils/migrations';
-import { isSmsConfigured } from './services/smsService';
 import { app } from './app';
 
 dotenv.config();
@@ -15,9 +14,6 @@ if (!mongoUri) {
 }
 if (process.env.NODE_ENV === 'production' && process.env.DEV_VERIFICATION_CODE) {
   console.warn('[startup] DEV_VERIFICATION_CODE is ignored in production — remove it from env');
-}
-if (process.env.NODE_ENV === 'production' && !isSmsConfigured()) {
-  console.warn('[startup] SMS is not configured (TWILIO_*) — center verification codes will only be logged');
 }
 
 connectDB(mongoUri)

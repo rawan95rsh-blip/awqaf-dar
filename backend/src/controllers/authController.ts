@@ -10,7 +10,6 @@ import { signToken } from '../utils/token';
 import type { UserDocument } from '../models/User';
 import { ensureDefaultLevelsForCenter } from '../utils/centerLevels';
 import { parsePhoneInput, phoneLookupCandidates } from '../utils/phone';
-import { sendSms } from '../services/smsService';
 import {
   isDigitsOnlyPassword,
   PASSWORD_DIGITS_ERROR_AR,
@@ -76,11 +75,24 @@ async function buildLoginResponse(user: UserDocument) {
   };
 }
 
+/**
+ * مؤقت لمراجعة آبل. الرمز ثابت وتعرفه المطوّرة، ولا يُرسل برسالة.
+ * بعد نزول التطبيق: امسحي هذا الثابت ليرجع رمز عشوائي يُطبع في سجل السيرفر فقط.
+ */
+const REVIEW_CENTER_CODE = '4826';
+const REVIEW_CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 function generateVerificationCode(): string {
+  if (REVIEW_CENTER_CODE) return REVIEW_CENTER_CODE;
   if (process.env.NODE_ENV === 'development') {
     return process.env.DEV_VERIFICATION_CODE ?? '7890';
   }
   return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function verificationExpiry(): Date {
+  const ttl = REVIEW_CENTER_CODE ? REVIEW_CODE_TTL_MS : 15 * 60 * 1000;
+  return new Date(Date.now() + ttl);
 }
 
 const VALID_SPECIALIZATIONS = ['mutor', 'dawa', 'atruja', 'courses', 'siraj'] as const;
@@ -213,7 +225,7 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
     });
 
     const code = generateVerificationCode();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const expiresAt = verificationExpiry();
 
     await VerificationCode.create({
       phone: normalizedPhone,
@@ -223,10 +235,10 @@ export async function registerCenter(req: Request, res: Response): Promise<void>
       userId: user._id,
     });
 
-    await sendSms(normalizedPhone, `كود تفعيل حساب المركز في تطبيق دور القرآن: ${code}`);
+    console.log(`[center-code] +${normalizedPhone} ${code}`);
 
     const data: { message: string; phone: string; devCode?: string } = {
-      message: 'تم إرسال كود التحقق',
+      message: 'تم حفظ طلب التفعيل. الرمز يصدر من مطورة التطبيق',
       phone: normalizedPhone,
     };
 
@@ -449,13 +461,13 @@ export async function resendCenterCode(req: Request, res: Response): Promise<voi
       phone: parsedPhone.phone,
       code,
       purpose: 'center_registration',
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      expiresAt: verificationExpiry(),
       userId: user._id,
     });
-    await sendSms(parsedPhone.phone, `كود تفعيل حساب المركز في تطبيق دور القرآن: ${code}`);
+    console.log(`[center-code] +${parsedPhone.phone} ${code}`);
 
     sendSuccess(res, {
-      message: 'تم إرسال كود جديد',
+      message: 'تم تجديد رمز التفعيل',
       ...(process.env.NODE_ENV === 'development' ? { devCode: code } : {}),
     });
   } catch (err) {
